@@ -5,15 +5,14 @@ import { getFirestore, collection, addDoc, doc, setDoc, getDoc, onSnapshot, quer
 import { ArrowLeft, Award, Calendar, CheckCircle, ChevronDown, ChevronRight, Crown, Edit, Eye, EyeOff, LogOut, Plus, RefreshCw, Send, Shield, Trash2, UserPlus, Users, X } from 'lucide-react';
 
 // --- Firebase Configuration ---
-// This configuration is a placeholder. In a real environment, these would be securely managed.
 const firebaseConfig = {
-  apiKey: "AIzaSyCnvsbyuAxp32C_S-J166mKfi4rOgw4Vk0",
-  authDomain: "competition-hub-b047f.firebaseapp.com",
-  projectId: "competition-hub-b047f",
-  storageBucket: "competition-hub-b047f.firebasestorage.app",
-  messagingSenderId: "650425420315",
-  appId: "1:650425420315:web:3f94b36e1915dd14d6c6be",
-  measurementId: "G-SNTWDVCYGH"
+  apiKey: import.meta.env.VITE_API_KEY,
+  authDomain: import.meta.env.VITE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_APP_ID,
+  measurementId: import.meta.env.VITE_MEASUREMENT_ID
 };
 
 // Initialize Firebase
@@ -201,6 +200,28 @@ function Dashboard({ user, onNavigateToCompetition }) {
         return () => unsubscribe();
     }, []);
 
+    const handleCreateCompetition = async (formData) => {
+        if (!formData.name || !formData.startDate || !formData.endDate) {
+            alert('Please fill in name, start date, and end date.');
+            return;
+        }
+        try {
+            const accessCode = formData.accessType === 'code' ? generateCode() : null;
+            await addDoc(collection(db, 'competitions'), {
+                ...formData,
+                creatorId: user.uid,
+                adminIds: [user.uid],
+                createdAt: serverTimestamp(),
+                accessCode,
+                participantCount: 0,
+            });
+            setShowCreateModal(false);
+        } catch (error) {
+            console.error("Error creating competition: ", error);
+            alert('Failed to create competition.');
+        }
+    };
+
     return (
         <div className="max-w-7xl mx-auto">
             <div className="flex justify-between items-center mb-6">
@@ -216,7 +237,7 @@ function Dashboard({ user, onNavigateToCompetition }) {
                     ))}
                 </div>
             }
-            {showCreateModal && <CreateCompetitionModal user={user} onClose={() => setShowCreateModal(false)} />}
+            {showCreateModal && <CreateCompetitionModal user={user} onClose={() => setShowCreateModal(false)} onSubmit={handleCreateCompetition} />}
         </div>
     );
 }
@@ -245,7 +266,7 @@ function CompetitionCard({ competition, onSelect }) {
     );
 }
 
-function CreateCompetitionModal({ user, onClose }) {
+function CreateCompetitionModal({ user, onClose, onSubmit }) {
     const [step, setStep] = useState(1);
     const [formData, setFormData] = useState({
         name: '', description: '', startDate: '', endDate: '',
@@ -288,26 +309,8 @@ function CreateCompetitionModal({ user, onClose }) {
         setFormData(prev => ({ ...prev, tasks: formData.tasks.filter((_, i) => i !== index) }));
     };
 
-    const handleSubmit = async () => {
-        if (!formData.name || !formData.startDate || !formData.endDate) {
-            alert('Please fill in name, start date, and end date.');
-            return;
-        }
-        try {
-            const accessCode = formData.accessType === 'code' ? generateCode() : null;
-            await addDoc(collection(db, 'competitions'), {
-                ...formData,
-                creatorId: user.uid,
-                adminIds: [user.uid],
-                createdAt: serverTimestamp(),
-                accessCode,
-                participantCount: 0,
-            });
-            onClose();
-        } catch (error) {
-            console.error("Error creating competition: ", error);
-            alert('Failed to create competition.');
-        }
+    const handleSubmit = () => {
+        onSubmit(formData);
     };
     
     const renderStep = () => {
@@ -346,9 +349,9 @@ function CreateCompetitionModal({ user, onClose }) {
                             <div>
                                 <label className="block text-sm font-medium text-gray-300 mb-1">Participation Mode</label>
                                 <select name="mode" value={formData.teamConfig.mode} onChange={handleTeamConfigChange} className="w-full bg-gray-700 p-2 rounded">
-                                    <option value="individual">Individuals only</option>
-                                    <option value="team-mandatory">All participants must join a team</option>
-                                    <option value="team-optional">Participants can choose to join a team</option>
+                                    <option value="individual">Individual</option>
+                                    <option value="team">Team</option>
+                                    <option value="mixed">Mixed (Participants can either compete individually or as a team)</option>
                                 </select>
                             </div>
                             {formData.teamConfig.mode !== 'individual' && (
