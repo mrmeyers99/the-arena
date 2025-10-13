@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth';
-import { getFirestore, collection, addDoc, doc, setDoc, getDoc, onSnapshot, query, where, updateDoc, arrayUnion, arrayRemove, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, doc, setDoc, getDoc, onSnapshot, query, where, updateDoc, arrayUnion, arrayRemove, deleteDoc, serverTimestamp, increment } from 'firebase/firestore';
 import { ArrowLeft, Award, Calendar, CheckCircle, ChevronDown, ChevronRight, Crown, Edit, Eye, EyeOff, LogOut, Plus, RefreshCw, Send, Shield, Trash2, UserPlus, Users, X } from 'lucide-react';
+import DailyTasks from './components/DailyTasks';
+import WeeklyTasks from './components/WeeklyTasks';
+import OneAndDoneTasks from './components/OneAndDoneTasks';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
@@ -23,13 +26,17 @@ const db = getFirestore(app);
 // --- Helper Functions ---
 const formatDate = (date) => {
   if (!date) return 'N/A';
-  // Check if it's a Firebase Timestamp
   if (date.toDate) {
     return date.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
-  // Assume it's a string or Date object
   return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
+
+const toISODateString = (date) => {
+    return new Date(date.getTime() - (date.getTimezoneOffset() * 60000 ))
+      .toISOString()
+      .split("T")[0];
+}
 
 const generateCode = (length = 6) => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -90,9 +97,12 @@ export default function App() {
 function Header({ user, onNavigateToDashboard }) {
   return (
     <header className="bg-gray-800 shadow-md p-4 flex justify-between items-center">
-      <h1 onClick={onNavigateToDashboard} className="text-2xl font-bold text-indigo-400 cursor-pointer hover:text-indigo-300 transition-colors">
-        Competition Hub
-      </h1>
+      <div onClick={onNavigateToDashboard} className="flex items-center cursor-pointer">
+        <img src="/assets/logo.jpg" alt="The Arena Logo" className="h-8 w-8 mr-2" />
+        <h1 className="text-2xl font-bold text-indigo-400 hover:text-indigo-300 transition-colors">
+          The Arena
+        </h1>
+      </div>
       <div className="flex items-center space-x-4">
         <span className="text-gray-300 hidden sm:block">Welcome, {user.displayName || user.email}</span>
         <button onClick={() => signOut(auth)} className="flex items-center bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
@@ -374,7 +384,7 @@ function CreateCompetitionModal({ user, onClose, onSubmit }) {
                                         <input type="checkbox" id="allowMultipleTeams" name="allowMultipleTeams" checked={formData.teamConfig.allowMultipleTeams} onChange={handleTeamConfigChange} className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
                                         <label htmlFor="allowMultipleTeams" className="ml-2 block text-sm text-gray-300">Allow participants to join more than one team</label>
                                     </div>
-                                </>
+                                </> 
                             )}
                         </div>
                     </div>
@@ -394,9 +404,9 @@ function CreateCompetitionModal({ user, onClose, onSubmit }) {
                                     <div className="grid grid-cols-2 gap-2">
                                         <input type="number" name="points" placeholder="Points" value={task.points} onChange={(e) => handleTaskChange(index, e)} className="w-full bg-gray-600 p-2 rounded" />
                                         <select name="frequency" value={task.frequency} onChange={(e) => handleTaskChange(index, e)} className="w-full bg-gray-600 p-2 rounded">
-                                            <option value="once">Once</option>
                                             <option value="daily">Daily</option>
                                             <option value="weekly">Weekly</option>
+                                            <option value="once">One and Done</option>
                                         </select>
                                     </div>
                                     <div className="mt-2">
@@ -467,8 +477,6 @@ function CompetitionView({ user, competitionId, onBack }) {
     const [competition, setCompetition] = useState(null);
     const [participants, setParticipants] = useState([]);
     const [teams, setTeams] = useState([]);
-    const [discussion, setDiscussion] = useState([]);
-    const [announcements, setAnnouncements] = useState([]);
     const [userEntries, setUserEntries] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isParticipant, setIsParticipant] = useState(false);
@@ -479,13 +487,14 @@ function CompetitionView({ user, competitionId, onBack }) {
     useEffect(() => {
         if (!competitionId) return;
         setLoading(true);
+
         const unsubCompetition = onSnapshot(doc(db, 'competitions', competitionId), (doc) => {
             if(doc.exists()){
                 const compData = { id: doc.id, ...doc.data() };
                 setCompetition(compData);
                 setIsParticipant(compData.participantIds?.includes(user.uid));
             } else {
-                setCompetition(null); // Or handle not found
+                setCompetition(null);
             }
             setLoading(false);
         });
@@ -498,12 +507,15 @@ function CompetitionView({ user, competitionId, onBack }) {
             setTeams(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
 
-        // Other listeners for discussion, announcements, entries etc would go here
+        const unsubEntries = onSnapshot(query(collection(db, 'competitions', competitionId, 'entries'), where('userId', '==', user.uid)), (snapshot) => {
+            setUserEntries(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
         
         return () => {
             unsubCompetition();
             unsubParticipants();
             unsubTeams();
+            unsubEntries();
         };
 
     }, [competitionId, user.uid]);
@@ -521,7 +533,7 @@ function CompetitionView({ user, competitionId, onBack }) {
             
             await updateDoc(competitionRef, {
                 participantIds: arrayUnion(user.uid),
-                participantCount: (competition.participantCount || 0) + 1
+                participantCount: increment(1)
             });
             
         } catch (error) {
@@ -529,9 +541,54 @@ function CompetitionView({ user, competitionId, onBack }) {
             alert("Failed to join.");
         }
     };
+
+    const handleTaskCheck = async (task, date, isCompleted) => {
+        const points = parseInt(task.points, 10);
+        const participantRef = doc(db, 'competitions', competitionId, 'participants', user.uid);
+        const isOneAndDone = task.frequency === 'once';
+        const entryDate = toISODateString(date);
+        const entryId = isOneAndDone ? `${user.uid}_${task.id}` : `${user.uid}_${task.id}_${entryDate}`;
+        const entryRef = doc(db, 'competitions', competitionId, 'entries', entryId);
+
+        // Optimistic UI update
+        const previousEntries = userEntries;
+        if (isCompleted) {
+            const newEntry = { id: entryId, userId: user.uid, taskId: task.id, date: entryDate };
+            setUserEntries([...previousEntries, newEntry]);
+        } else {
+            setUserEntries(previousEntries.filter(e => e.id !== entryId));
+        }
+
+        try {
+            if (isCompleted) {
+                await setDoc(entryRef, {
+                    userId: user.uid,
+                    taskId: task.id,
+                    date: entryDate,
+                    completedAt: serverTimestamp(),
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    pointsAwarded: points
+                });
+                await updateDoc(participantRef, { score: increment(points) });
+            } else {
+                const entrySnap = await getDoc(entryRef);
+                if (entrySnap.exists()) {
+                    const pointsToSubtract = entrySnap.data().pointsAwarded || points;
+                    await deleteDoc(entryRef);
+                    await updateDoc(participantRef, { score: increment(-pointsToSubtract) });
+                }
+            }
+        } catch (error) {
+            // Revert UI on error
+            setUserEntries(previousEntries);
+            console.error('Error updating task entry:', error);
+            alert('Failed to update task.');
+        }
+    };
     
     if (loading) return <div className="text-center p-8"><RefreshCw className="animate-spin inline-block" /> Loading Competition...</div>;
     if (!competition) return <div className="text-center p-8">Competition not found. <button onClick={onBack} className="text-indigo-400 underline">Go Back</button></div>;
+    const hasTeams = competition.teamConfig.mode !== 'individual';
 
     return (
         <div className="max-w-7xl mx-auto">
@@ -561,21 +618,7 @@ function CompetitionView({ user, competitionId, onBack }) {
             {/* Main content tabs would go here */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 space-y-6">
-                    {/* Tasks Component Placeholder */}
-                    <div className="bg-gray-800 rounded-xl shadow-lg p-6">
-                         <h3 className="text-xl font-bold text-white mb-4">Your Tasks</h3>
-                         <div className="space-y-3">
-                             {competition.tasks.map(task => (
-                                <div key={task.id} className="bg-gray-700 p-4 rounded-lg flex justify-between items-center">
-                                    <div>
-                                        <p className="font-semibold text-gray-200">{task.name}</p>
-                                        <p className="text-sm text-gray-400">{task.frequency} | <span className="text-yellow-400">{task.points} points</span></p>
-                                    </div>
-                                    <button className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-1 px-3 rounded-lg text-sm">Log Entry</button>
-                                </div>
-                             ))}
-                         </div>
-                    </div>
+                    <YourTasks user={user} competition={competition} userEntries={userEntries} onTaskCheck={handleTaskCheck} />
                     {/* Discussion Board Placeholder */}
                     <div className="bg-gray-800 rounded-xl shadow-lg p-6">
                          <h3 className="text-xl font-bold text-white mb-4">General Discussion</h3>
@@ -586,14 +629,49 @@ function CompetitionView({ user, competitionId, onBack }) {
                     {/* Leaderboard Component */}
                     <Leaderboard participants={participants} teams={teams} teamConfig={competition.teamConfig} />
                     {/* Teams Component Placeholder */}
-                    <div className="bg-gray-800 rounded-xl shadow-lg p-6">
-                        <h3 className="text-xl font-bold text-white mb-4">Teams</h3>
-                         {/* Team list and create/join controls */}
-                    </div>
+                    { hasTeams && (
+                        <div className="bg-gray-800 rounded-xl shadow-lg p-6">
+                            <h3 className="text-xl font-bold text-white mb-4">Teams</h3>
+                             {/* Team list and create/join controls */}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
     );
+}
+
+function YourTasks({ user, competition, userEntries, onTaskCheck }) {
+  const [activeTab, setActiveTab] = useState('daily');
+
+  return (
+    <div className="bg-gray-800 rounded-xl shadow-lg p-6">
+      <div className="flex justify-between items-center mb-4">
+        <div>
+          <h3 className="text-xl font-bold text-white">Your Tasks</h3>
+          <p className="text-gray-400">Total Points: 1,250</p>
+        </div>
+        <div className="w-1/2">
+            <div className="h-4 bg-gray-700 rounded-full">
+                <div className="h-4 bg-indigo-600 rounded-full" style={{ width: '75%' }}></div>
+            </div>
+            <p className="text-right text-sm text-gray-400 mt-1">75%</p>
+        </div>
+      </div>
+
+      <div className="flex border-b border-gray-700 mb-4">
+        <button onClick={() => setActiveTab('daily')} className={`py-2 px-4 text-sm font-medium ${activeTab === 'daily' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-white'}`}>DAILY TASKS</button>
+        <button onClick={() => setActiveTab('weekly')} className={`py-2 px-4 text-sm font-medium ${activeTab === 'weekly' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-white'}`}>WEEKLY TASKS</button>
+        <button onClick={() => setActiveTab('one-and-done')} className={`py-2 px-4 text-sm font-medium ${activeTab === 'one-and-done' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-white'}`}>ONE-AND-DONE</button>
+      </div>
+
+      <div>
+        {activeTab === 'daily' && <DailyTasks tasks={competition.tasks.filter(t => t.frequency === 'daily')} userEntries={userEntries} onTaskCheck={onTaskCheck} competitionStartDate={competition.startDate} competitionEndDate={competition.endDate} toISODateString={toISODateString} />}
+        {activeTab === 'weekly' && <WeeklyTasks tasks={competition.tasks.filter(t => t.frequency === 'weekly')} userEntries={userEntries} onTaskCheck={onTaskCheck} competitionStartDate={competition.startDate} competitionEndDate={competition.endDate} toISODateString={toISODateString} />}
+        {activeTab === 'one-and-done' && <OneAndDoneTasks tasks={competition.tasks.filter(t => t.frequency === 'once')} userEntries={userEntries} onTaskCheck={onTaskCheck} />}
+      </div>
+    </div>
+  );
 }
 
 function Leaderboard({ participants, teams, teamConfig }) {
