@@ -476,6 +476,7 @@ function CreateCompetitionModal({ user, onClose, onSubmit }) {
 function CompetitionView({ user, competitionId, onBack }) {
     const [competition, setCompetition] = useState(null);
     const [participants, setParticipants] = useState([]);
+    const [participant, setParticipant] = useState(null);
     const [teams, setTeams] = useState([]);
     const [userEntries, setUserEntries] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -500,7 +501,9 @@ function CompetitionView({ user, competitionId, onBack }) {
         });
         
         const unsubParticipants = onSnapshot(collection(db, 'competitions', competitionId, 'participants'), (snapshot) => {
-             setParticipants(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            let participants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+             setParticipants(participants);
+             setParticipant(participants.find(p => p.id === user.uid));
         });
 
         const unsubTeams = onSnapshot(collection(db, 'competitions', competitionId, 'teams'), (snapshot) => {
@@ -607,7 +610,7 @@ function CompetitionView({ user, competitionId, onBack }) {
             {/* Main content tabs would go here */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 space-y-6">
-                    <YourTasks user={user} competition={competition} userEntries={userEntries} onTaskCheck={handleTaskCheck} />
+                    <YourTasks user={user} competition={competition} userEntries={userEntries} onTaskCheck={handleTaskCheck} participant={participant} />
                     {/* Discussion Board Placeholder */}
                     <div className="bg-gray-800 rounded-xl shadow-lg p-6">
                          <h3 className="text-xl font-bold text-white mb-4">General Discussion</h3>
@@ -630,7 +633,7 @@ function CompetitionView({ user, competitionId, onBack }) {
     );
 }
 
-function YourTasks({ user, competition, userEntries, onTaskCheck }) {
+function YourTasks({ user, competition, userEntries, onTaskCheck, participant }) {
   const taskGroups = useMemo(() => ({
     daily: competition.tasks.filter(t => t.frequency === 'daily'),
     weekly: competition.tasks.filter(t => t.frequency === 'weekly'),
@@ -644,7 +647,7 @@ function YourTasks({ user, competition, userEntries, onTaskCheck }) {
       if (taskGroups['one-and-done'].length > 0) tabs.push('one-and-done');
       return tabs;
   }, [taskGroups]);
-  
+
   const [activeTab, setActiveTab] = useState('daily');
 
   useEffect(() => {
@@ -682,7 +685,7 @@ function YourTasks({ user, competition, userEntries, onTaskCheck }) {
       <div className="flex justify-between items-center mb-4">
         <div>
           <h3 className="text-xl font-bold text-white">Your Tasks</h3>
-          <p className="text-gray-400">Total Points: 1,250</p>
+          <p className="text-gray-400">Total Points: {participant.score}</p>
         </div>
         <div className="w-1/2">
             <div className="h-4 bg-gray-700 rounded-full">
@@ -709,7 +712,7 @@ function YourTasks({ user, competition, userEntries, onTaskCheck }) {
 
 function Leaderboard({ participants, teams, teamConfig }) {
     const [activeTab, setActiveTab] = useState('individual');
-    
+
     const sortedParticipants = useMemo(() => {
         return [...participants].sort((a, b) => (b.score || 0) - (a.score || 0));
     }, [participants]);
