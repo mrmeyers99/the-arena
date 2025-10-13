@@ -550,15 +550,6 @@ function CompetitionView({ user, competitionId, onBack }) {
         const entryId = isOneAndDone ? `${user.uid}_${task.id}` : `${user.uid}_${task.id}_${entryDate}`;
         const entryRef = doc(db, 'competitions', competitionId, 'entries', entryId);
 
-        // Optimistic UI update
-        const previousEntries = userEntries;
-        if (isCompleted) {
-            const newEntry = { id: entryId, userId: user.uid, taskId: task.id, date: entryDate };
-            setUserEntries([...previousEntries, newEntry]);
-        } else {
-            setUserEntries(previousEntries.filter(e => e.id !== entryId));
-        }
-
         try {
             if (isCompleted) {
                 await setDoc(entryRef, {
@@ -579,8 +570,6 @@ function CompetitionView({ user, competitionId, onBack }) {
                 }
             }
         } catch (error) {
-            // Revert UI on error
-            setUserEntries(previousEntries);
             console.error('Error updating task entry:', error);
             alert('Failed to update task.');
         }
@@ -642,7 +631,51 @@ function CompetitionView({ user, competitionId, onBack }) {
 }
 
 function YourTasks({ user, competition, userEntries, onTaskCheck }) {
+  const taskGroups = useMemo(() => ({
+    daily: competition.tasks.filter(t => t.frequency === 'daily'),
+    weekly: competition.tasks.filter(t => t.frequency === 'weekly'),
+    'one-and-done': competition.tasks.filter(t => t.frequency === 'once'),
+  }), [competition.tasks]);
+
+  const availableTabs = useMemo(() => {
+      const tabs = [];
+      if (taskGroups.daily.length > 0) tabs.push('daily');
+      if (taskGroups.weekly.length > 0) tabs.push('weekly');
+      if (taskGroups['one-and-done'].length > 0) tabs.push('one-and-done');
+      return tabs;
+  }, [taskGroups]);
+  
   const [activeTab, setActiveTab] = useState('daily');
+
+  useEffect(() => {
+    // Set initial tab to the first available one
+    if (availableTabs.length > 0) {
+        setActiveTab(availableTabs[0]);
+    }
+  }, [competition.tasks]); // Re-run when tasks change
+
+  useEffect(() => {
+    // If the active tab becomes unavailable (e.g. due to filtering), switch to the first available tab
+    if (availableTabs.length > 0 && !availableTabs.includes(activeTab)) {
+      setActiveTab(availableTabs[0]);
+    }
+  }, [activeTab, availableTabs]);
+
+  const renderContent = () => {
+    if (availableTabs.length === 0) {
+        return <p className="text-gray-400">No tasks have been set for this competition yet.</p>;
+    }
+    switch(activeTab) {
+      case 'daily':
+        return <DailyTasks tasks={taskGroups.daily} userEntries={userEntries} onTaskCheck={onTaskCheck} competitionStartDate={competition.startDate} competitionEndDate={competition.endDate} />;
+      case 'weekly':
+        return <WeeklyTasks tasks={taskGroups.weekly} userEntries={userEntries} onTaskCheck={onTaskCheck} competitionStartDate={competition.startDate} competitionEndDate={competition.endDate} />;
+      case 'one-and-done':
+        return <OneAndDoneTasks tasks={taskGroups['one-and-done']} userEntries={userEntries} onTaskCheck={onTaskCheck} />;
+      default:
+        return null;
+    }
+  }
 
   return (
     <div className="bg-gray-800 rounded-xl shadow-lg p-6">
@@ -659,16 +692,16 @@ function YourTasks({ user, competition, userEntries, onTaskCheck }) {
         </div>
       </div>
 
-      <div className="flex border-b border-gray-700 mb-4">
-        <button onClick={() => setActiveTab('daily')} className={`py-2 px-4 text-sm font-medium ${activeTab === 'daily' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-white'}`}>DAILY TASKS</button>
-        <button onClick={() => setActiveTab('weekly')} className={`py-2 px-4 text-sm font-medium ${activeTab === 'weekly' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-white'}`}>WEEKLY TASKS</button>
-        <button onClick={() => setActiveTab('one-and-done')} className={`py-2 px-4 text-sm font-medium ${activeTab === 'one-and-done' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-white'}`}>ONE-AND-DONE</button>
-      </div>
+      {availableTabs.length > 1 && (
+        <div className="flex border-b border-gray-700 mb-4">
+          {availableTabs.includes('daily') && <button onClick={() => setActiveTab('daily')} className={`py-2 px-4 text-sm font-medium ${activeTab === 'daily' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-white'}`}>DAILY TASKS</button>}
+          {availableTabs.includes('weekly') && <button onClick={() => setActiveTab('weekly')} className={`py-2 px-4 text-sm font-medium ${activeTab === 'weekly' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-white'}`}>WEEKLY TASKS</button>}
+          {availableTabs.includes('one-and-done') && <button onClick={() => setActiveTab('one-and-done')} className={`py-2 px-4 text-sm font-medium ${activeTab === 'one-and-done' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-white'}`}>ONE-AND-DONE</button>}
+        </div>
+      )}
 
       <div>
-        {activeTab === 'daily' && <DailyTasks tasks={competition.tasks.filter(t => t.frequency === 'daily')} userEntries={userEntries} onTaskCheck={onTaskCheck} competitionStartDate={competition.startDate} competitionEndDate={competition.endDate} toISODateString={toISODateString} />}
-        {activeTab === 'weekly' && <WeeklyTasks tasks={competition.tasks.filter(t => t.frequency === 'weekly')} userEntries={userEntries} onTaskCheck={onTaskCheck} competitionStartDate={competition.startDate} competitionEndDate={competition.endDate} toISODateString={toISODateString} />}
-        {activeTab === 'one-and-done' && <OneAndDoneTasks tasks={competition.tasks.filter(t => t.frequency === 'once')} userEntries={userEntries} onTaskCheck={onTaskCheck} />}
+        {renderContent()}
       </div>
     </div>
   );
