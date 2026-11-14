@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 // --- Firebase mocks -------------------------------------------------------
 // Refs are plain objects carrying their Firestore path; onSnapshot serves data
 // from `store` keyed by that path.
-const store = vi.hoisted(() => ({ docs: {}, collections: {}, authUser: null, authCallback: null }));
+const store = vi.hoisted(() => ({ docs: {}, collections: {}, batches: [], authUser: null, authCallback: null }));
 
 vi.mock('firebase/app', () => ({ initializeApp: vi.fn(() => ({})) }));
 
@@ -30,7 +30,12 @@ vi.mock('firebase/firestore', () => {
   return {
     getFirestore: vi.fn(() => ({})),
     collection: vi.fn((db, ...segments) => ({ type: 'collection', path: segments.join('/') })),
-    doc: vi.fn((db, ...segments) => ({ type: 'doc', path: segments.join('/') })),
+    // doc(collectionRef) mints a new id, like the real SDK.
+    doc: vi.fn((parent, ...segments) =>
+      parent?.type === 'collection' && segments.length === 0
+        ? { type: 'doc', id: 'new', path: `${parent.path}/new` }
+        : { type: 'doc', id: segments.at(-1), path: segments.join('/') }
+    ),
     query: vi.fn((ref) => ({ ...ref })),
     where: vi.fn(),
     onSnapshot: vi.fn((ref, cb) => {
@@ -45,7 +50,16 @@ vi.mock('firebase/firestore', () => {
       return vi.fn();
     }),
     getDoc: vi.fn(async (ref) => makeDoc(ref.path, store.docs[ref.path])),
-    addDoc: vi.fn(async () => ({ id: 'new' })),
+    writeBatch: vi.fn(() => {
+      const batch = { ops: [], committed: false };
+      batch.set = vi.fn((ref, data) => batch.ops.push({ op: 'set', path: ref.path, data }));
+      batch.update = vi.fn((ref, data) => batch.ops.push({ op: 'update', path: ref.path, data }));
+      batch.commit = vi.fn(async () => {
+        batch.committed = true;
+      });
+      store.batches.push(batch);
+      return batch;
+    }),
     setDoc: vi.fn(async () => {}),
     updateDoc: vi.fn(async () => {}),
     deleteDoc: vi.fn(async () => {}),
@@ -88,6 +102,8 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2025-01-15T12:00:00Z'));
   vi.clearAllMocks();
   store.authUser = null;
+  store.batches = [];
+  window.history.replaceState(null, '', '/');
   store.docs = { 'competitions/c1': competition };
   store.collections = {
     competitions: { c1: competition },
@@ -144,6 +160,17 @@ describe('App when signed in', () => {
     store.authUser = user;
   });
 
+  it('only queries competitions the user may discover, de-duplicated', () => {
+    render(<App />);
+    expect(firestore.where.mock.calls).toEqual([
+      ['accessType', 'in', ['open', 'code']],
+      ['participantIds', 'array-contains', 'u1'],
+      ['adminIds', 'array-contains', 'u1']
+    ]);
+    // c1 matches all three queries but is shown once.
+    expect(screen.getAllByRole('button', { name: 'View Competition' })).toHaveLength(1);
+  });
+
   it('lists competitions on the dashboard', () => {
     render(<App />);
     expect(screen.getByText('Welcome, Alice')).toBeInTheDocument();
@@ -171,8 +198,10 @@ describe('App when signed in', () => {
     fireEvent.change(screen.getByPlaceholderText('Task Name'), { target: { value: 'Push-ups' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'Create Competition' }).at(-1));
 
-    await waitFor(() => expect(firestore.addDoc).toHaveBeenCalledTimes(1));
-    const data = firestore.addDoc.mock.calls[0][1];
+    await waitFor(() => expect(store.batches[0]?.committed).toBe(true));
+    const [compOp, secretOp] = store.batches[0].ops;
+    expect(compOp.path).toBe('competitions/new');
+    const data = compOp.data;
     expect(data).toMatchObject({
       name: 'New Comp',
       startDate: '2025-02-01',
@@ -181,7 +210,11 @@ describe('App when signed in', () => {
       adminIds: ['u1'],
       participantCount: 0
     });
-    expect(data.accessCode).toMatch(/^[A-Z0-9]{6}$/);
+    // The code must not be on the competition doc, which everyone can read.
+    expect(data).not.toHaveProperty('accessCode');
+    expect(data.accessType).toBe('code');
+    expect(secretOp).toMatchObject({ op: 'set', path: 'competitions/new/private/access' });
+    expect(secretOp.data.accessCode).toMatch(/^[A-Z0-9]{8}$/);
     expect(data.tasks).toHaveLength(1);
     expect(data.tasks[0]).toMatchObject({ name: 'Push-ups', points: 10, frequency: 'once' });
     expect(data.tasks[0].id).toMatch(/^[A-Z0-9]{8}$/);
@@ -244,20 +277,81 @@ describe('App when signed in', () => {
     expect(screen.getByText('Year 2025, Week 3')).toBeInTheDocument();
   });
 
-  it('joins a competition', async () => {
-    store.docs['competitions/c1'] = { ...competition, participantIds: [] };
+  it('joins an open competition in one batch', async () => {
+    store.docs['competitions/c1'] = { ...competition, accessType: 'open', participantIds: [] };
+    await openCompetition();
+    expect(screen.queryByLabelText('Access Code')).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Join Competition' }));
+    });
+    const batch = store.batches.at(-1);
+    expect(batch.committed).toBe(true);
+    expect(batch.ops).toEqual([
+      {
+        op: 'set',
+        path: 'competitions/c1/participants/u1',
+        data: expect.objectContaining({ displayName: 'Alice', score: 0 })
+      },
+      {
+        op: 'update',
+        path: 'competitions/c1',
+        data: { participantIds: { arrayUnion: ['u1'] }, participantCount: { increment: 1 } }
+      }
+    ]);
+  });
+
+  it('joins a code competition by submitting the code as an access grant', async () => {
+    store.docs['competitions/c1'] = { ...competition, accessType: 'code', adminIds: ['u9'], participantIds: [] };
+    await openCompetition();
+    fireEvent.change(screen.getByLabelText('Access Code'), { target: { value: ' secret42 ' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Join Competition' }));
+    });
+    const batch = store.batches.at(-1);
+    expect(batch.committed).toBe(true);
+    expect(batch.ops[0]).toEqual({
+      op: 'set',
+      path: 'competitions/c1/accessGrants/u1',
+      data: { accessCode: 'SECRET42' }
+    });
+    expect(batch.ops.map((o) => o.path)).toEqual([
+      'competitions/c1/accessGrants/u1',
+      'competitions/c1/participants/u1',
+      'competitions/c1'
+    ]);
+  });
+
+  it('asks for the code before joining a code competition', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    store.docs['competitions/c1'] = { ...competition, accessType: 'code', adminIds: ['u9'], participantIds: [] };
     await openCompetition();
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Join Competition' }));
     });
-    expect(firestore.setDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'competitions/c1/participants/u1' }),
-      expect.objectContaining({ displayName: 'Alice', score: 0 })
-    );
-    expect(firestore.updateDoc).toHaveBeenCalledWith(expect.objectContaining({ path: 'competitions/c1' }), {
-      participantIds: { arrayUnion: ['u1'] },
-      participantCount: { increment: 1 }
-    });
+    expect(alertSpy).toHaveBeenCalledWith('Enter the access code to join.');
+    expect(store.batches).toHaveLength(0);
+    alertSpy.mockRestore();
+  });
+
+  it('shows admins the invite link and the access code', async () => {
+    store.docs['competitions/c1'] = { ...competition, accessType: 'code' };
+    store.docs['competitions/c1/private/access'] = { accessCode: 'SECRET42' };
+    await openCompetition();
+    expect(await screen.findByText('SECRET42')).toBeInTheDocument();
+    expect(screen.getByText(/\?competition=c1$/)).toBeInTheDocument();
+  });
+
+  it('does not try to read the access code as a non-admin', async () => {
+    store.docs['competitions/c1'] = { ...competition, accessType: 'code', adminIds: ['u9'] };
+    await openCompetition();
+    expect(firestore.getDoc).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Invite link/)).not.toBeInTheDocument();
+  });
+
+  it('opens a competition straight from an invite link', async () => {
+    window.history.replaceState(null, '', '/?competition=c1');
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: 'Spring Challenge' })).toBeInTheDocument();
   });
 
   it('returns to the dashboard', async () => {

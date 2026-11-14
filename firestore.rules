@@ -24,18 +24,39 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys();
     }
 
+    function compPath(competitionId) {
+      return /databases/$(database)/documents/competitions/$(competitionId);
+    }
+
     function isParticipant(competitionId) {
       return exists(/databases/$(database)/documents/competitions/$(competitionId)/participants/$(uid()));
     }
 
     // ---------- competitions/{competitionId} ----------
     //
-    // Created from the dashboard with addDoc(). The only update the app makes
-    // is the "join" step: arrayUnion(uid) on participantIds and
-    // increment(1) on participantCount, done by the joining user (who is
-    // usually NOT the creator). The app never edits or deletes competitions.
+    // Created from the dashboard in a batch (together with the access code
+    // secret for "code" competitions). The only update the app makes is the
+    // "join" step: arrayUnion(uid) on participantIds and increment(1) on
+    // participantCount, done by the joining user (who is usually NOT the
+    // creator). The app never edits or deletes competitions.
+    //
+    // Access types:
+    //   open - listed on the dashboard, anyone signed in can join.
+    //   code - listed, but joining needs the access code (see accessGrants).
+    //          The code itself lives in private/access, never on this doc.
+    //   link - NOT listed to non-members; the competition id in the invite
+    //          link is the secret. Anyone who has the id can view and join.
     match /competitions/{competitionId} {
-      allow read: if signedIn();
+      // Fetching a single competition by id is how invite links work.
+      allow get: if signedIn();
+
+      // Queries must be limited to competitions the caller may discover:
+      // open/code ones, or ones they are a member or admin of. Link
+      // competitions are therefore never enumerable by outsiders.
+      allow list: if signedIn()
+        && (resource.data.accessType in ['open', 'code']
+            || uid() in resource.data.get('participantIds', [])
+            || uid() in resource.data.adminIds);
 
       allow create: if signedIn() && validNewCompetition(request.resource.data);
 
@@ -48,16 +69,19 @@ service cloud.firestore {
         return data.keys().hasAll(['name', 'startDate', 'endDate', 'accessType',
                                    'teamConfig', 'tasks', 'creatorId', 'adminIds',
                                    'createdAt', 'participantCount'])
+          // accessCode is deliberately NOT allowed here: this doc is readable
+          // by every signed-in user. The code goes in private/access.
           && data.keys().hasOnly(['name', 'description', 'startDate', 'endDate',
                                   'accessType', 'teamConfig', 'tasks', 'creatorId',
-                                  'adminIds', 'createdAt', 'accessCode',
-                                  'participantCount'])
+                                  'adminIds', 'createdAt', 'participantCount'])
           && data.name is string && data.name.size() > 0 && data.name.size() <= 200
           && (!('description' in data) || data.description is string)
           && data.startDate is string
           && data.endDate is string
           && data.accessType in ['open', 'code', 'link']
-          && (!('accessCode' in data) || data.accessCode == null || data.accessCode is string)
+          // A code competition must be created together with its secret.
+          && (data.accessType != 'code'
+              || existsAfter(/databases/$(database)/documents/competitions/$(competitionId)/private/access))
           && data.teamConfig is map
           && data.tasks is list
           // The creator must be the caller and the sole initial admin.
@@ -69,8 +93,9 @@ service cloud.firestore {
       }
 
       // A user adds exactly themselves to participantIds and bumps the count
-      // by exactly one. They must already have written their own participant
-      // doc (the app does that first), and must not already be listed.
+      // by exactly one. Their participant doc must exist after this write
+      // (the app creates both in one batch; the participant rule is where the
+      // access check happens), and they must not already be listed.
       function isJoin() {
         let before = resource.data.get('participantIds', []);
         let after = request.resource.data.get('participantIds', []);
@@ -80,7 +105,57 @@ service cloud.firestore {
           && after.size() == before.size() + 1
           && after.toSet() == before.toSet().union([uid()].toSet())
           && request.resource.data.participantCount == resource.data.get('participantCount', 0) + 1
-          && isParticipant(competitionId);
+          && existsAfter(/databases/$(database)/documents/competitions/$(competitionId)/participants/$(uid()));
+      }
+
+      // May the caller join? Open and link competitions: yes (for link, having
+      // the id is the credential). Code competitions: only with a valid access
+      // grant for the caller, written in the same batch or earlier.
+      function mayJoin() {
+        let accessType = get(compPath(competitionId)).data.accessType;
+        return accessType in ['open', 'link']
+          || (accessType == 'code'
+              && existsAfter(/databases/$(database)/documents/competitions/$(competitionId)/accessGrants/$(uid())));
+      }
+
+      // ---------- private/access ----------
+      //
+      // { accessCode } for "code" competitions. Readable only by the
+      // competition's admins (so they can share it). Written once, in the
+      // same batch that creates the competition, by its creator.
+      match /private/{docId} {
+        allow read: if signedIn()
+          && uid() in get(compPath(competitionId)).data.adminIds;
+
+        allow create: if signedIn()
+          && docId == 'access'
+          && !exists(compPath(competitionId))
+          && getAfter(compPath(competitionId)).data.creatorId == uid()
+          && getAfter(compPath(competitionId)).data.accessType == 'code'
+          && request.resource.data.keys().hasOnly(['accessCode'])
+          && request.resource.data.accessCode is string
+          && request.resource.data.accessCode.size() >= 8;
+
+        allow update, delete: if false;
+      }
+
+      // ---------- accessGrants/{userId} ----------
+      //
+      // Proof that a user knows a code competition's access code. Doc id is
+      // the user's uid; it can only be created if the submitted code matches
+      // private/access. Readable only by its owner, so the code never leaks.
+      match /accessGrants/{userId} {
+        allow read: if signedIn() && userId == uid();
+
+        allow create: if signedIn()
+          && userId == uid()
+          && get(compPath(competitionId)).data.accessType == 'code'
+          && request.resource.data.keys().hasOnly(['accessCode'])
+          && request.resource.data.accessCode is string
+          && request.resource.data.accessCode
+               == get(/databases/$(database)/documents/competitions/$(competitionId)/private/access).data.accessCode;
+
+        allow update, delete: if false;
       }
 
       // ---------- participants/{userId} ----------
@@ -93,7 +168,8 @@ service cloud.firestore {
 
         allow create: if signedIn()
           && userId == uid()
-          && exists(/databases/$(database)/documents/competitions/$(competitionId))
+          && exists(compPath(competitionId))
+          && mayJoin()
           && request.resource.data.keys().hasOnly(['displayName', 'joinedAt', 'score'])
           && request.resource.data.keys().hasAll(['joinedAt', 'score'])
           && (request.resource.data.get('displayName', null) == null
