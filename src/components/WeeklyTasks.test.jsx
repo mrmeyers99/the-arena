@@ -4,7 +4,7 @@ import WeeklyTasks from './WeeklyTasks';
 
 const tasks = [
   { id: 'w1', name: 'Read a book', points: 20, frequency: 'weekly' },
-  { id: 'w2', name: 'Call a friend', points: 15, frequency: 'weekly' },
+  { id: 'w2', name: 'Call a friend', points: 15, frequency: 'weekly' }
 ];
 
 const renderWeekly = (props = {}) => {
@@ -61,8 +61,8 @@ describe('WeeklyTasks', () => {
     const { onTaskCheck } = renderWeekly({
       userEntries: [
         { taskId: 'w1', date: '2025-01-12' },
-        { taskId: 'w2', date: '2025-01-05' },
-      ],
+        { taskId: 'w2', date: '2025-01-05' }
+      ]
     });
     const { checkboxes } = getNavButtons();
     fireEvent.click(checkboxes[0]);
@@ -88,7 +88,7 @@ describe('WeeklyTasks', () => {
     expect(screen.getByText('Year 2025, Week 4')).toBeInTheDocument();
     const { next, checkboxes } = getNavButtons();
     expect(next).toBeDisabled();
-    checkboxes.forEach(cb => expect(cb).toBeDisabled());
+    checkboxes.forEach((cb) => expect(cb).toBeDisabled());
   });
 
   it('disables moving back past the competition start', () => {

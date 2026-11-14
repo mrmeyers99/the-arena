@@ -18,14 +18,14 @@ vi.mock('firebase/auth', () => ({
   createUserWithEmailAndPassword: vi.fn(async () => ({ user: { uid: 'new-user' } })),
   signInWithEmailAndPassword: vi.fn(async () => ({})),
   signOut: vi.fn(async () => {}),
-  updateProfile: vi.fn(async () => {}),
+  updateProfile: vi.fn(async () => {})
 }));
 
 vi.mock('firebase/firestore', () => {
   const makeDoc = (path, data) => ({
     id: path.split('/').pop(),
     exists: () => data !== undefined,
-    data: () => data,
+    data: () => data
   });
   return {
     getFirestore: vi.fn(() => ({})),
@@ -51,7 +51,7 @@ vi.mock('firebase/firestore', () => {
     deleteDoc: vi.fn(async () => {}),
     arrayUnion: vi.fn((...values) => ({ arrayUnion: values })),
     increment: vi.fn((n) => ({ increment: n })),
-    serverTimestamp: vi.fn(() => 'SERVER_TIMESTAMP'),
+    serverTimestamp: vi.fn(() => 'SERVER_TIMESTAMP')
   };
 });
 
@@ -73,8 +73,8 @@ const competition = {
   tasks: [
     { id: 'd1', name: 'Stretch', points: '5', frequency: 'daily' },
     { id: 'w1', name: 'Long walk', points: '20', frequency: 'weekly' },
-    { id: 'o1', name: 'Run a 5k', points: '50', frequency: 'once' },
-  ],
+    { id: 'o1', name: 'Run a 5k', points: '50', frequency: 'once' }
+  ]
 };
 
 const openCompetition = async () => {
@@ -93,13 +93,13 @@ beforeEach(() => {
     competitions: { c1: competition },
     'competitions/c1/participants': {
       u1: { displayName: 'Alice', score: 30 },
-      u2: { displayName: 'Bob', score: 70 },
+      u2: { displayName: 'Bob', score: 70 }
     },
     'competitions/c1/teams': {
       t1: { name: 'Red', score: 10 },
-      t2: { name: 'Blue', score: 40 },
+      t2: { name: 'Blue', score: 40 }
     },
-    'competitions/c1/entries': {},
+    'competitions/c1/entries': {}
   };
 });
 
@@ -135,9 +135,7 @@ describe('App when signed out', () => {
     fireEvent.change(screen.getByPlaceholderText('Email'), { target: { value: 'z@b.com' } });
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'pw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
-    await waitFor(() =>
-      expect(auth.updateProfile).toHaveBeenCalledWith({ uid: 'new-user' }, { displayName: 'Zed' })
-    );
+    await waitFor(() => expect(auth.updateProfile).toHaveBeenCalledWith({ uid: 'new-user' }, { displayName: 'Zed' }));
   });
 });
 
@@ -181,7 +179,7 @@ describe('App when signed in', () => {
       endDate: '2025-03-01',
       creatorId: 'u1',
       adminIds: ['u1'],
-      participantCount: 0,
+      participantCount: 0
     });
     expect(data.accessCode).toMatch(/^[A-Z0-9]{6}$/);
     expect(data.tasks).toHaveLength(1);
@@ -193,12 +191,12 @@ describe('App when signed in', () => {
     await openCompetition();
     expect(screen.getByRole('heading', { name: 'Spring Challenge' })).toBeInTheDocument();
     expect(screen.getByText('Total Points: 30')).toBeInTheDocument();
-    const names = screen.getAllByRole('listitem').map(li => li.textContent);
+    const names = screen.getAllByRole('listitem').map((li) => li.textContent);
     expect(names[0]).toContain('Bob');
     expect(names[1]).toContain('Alice');
 
     fireEvent.click(screen.getByRole('button', { name: 'Teams' }));
-    const teams = screen.getAllByRole('listitem').map(li => li.textContent);
+    const teams = screen.getAllByRole('listitem').map((li) => li.textContent);
     expect(teams[0]).toContain('Blue');
     expect(teams[1]).toContain('Red');
   });
@@ -256,10 +254,10 @@ describe('App when signed in', () => {
       expect.objectContaining({ path: 'competitions/c1/participants/u1' }),
       expect.objectContaining({ displayName: 'Alice', score: 0 })
     );
-    expect(firestore.updateDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'competitions/c1' }),
-      { participantIds: { arrayUnion: ['u1'] }, participantCount: { increment: 1 } }
-    );
+    expect(firestore.updateDoc).toHaveBeenCalledWith(expect.objectContaining({ path: 'competitions/c1' }), {
+      participantIds: { arrayUnion: ['u1'] },
+      participantCount: { increment: 1 }
+    });
   });
 
   it('returns to the dashboard', async () => {

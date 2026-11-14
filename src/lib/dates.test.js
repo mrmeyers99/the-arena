@@ -108,7 +108,7 @@ describe('getWeekInfo', () => {
   });
 
   it('gives every day of the same ISO week the same result', () => {
-    const days = [13, 14, 15, 16, 17, 18, 19].map(d => getWeekInfo(new Date(2025, 0, d)));
+    const days = [13, 14, 15, 16, 17, 18, 19].map((d) => getWeekInfo(new Date(2025, 0, d)));
     for (const info of days) {
       expect(info.week).toBe(3);
       expect(iso(info.startDate)).toBe('2025-01-12');
