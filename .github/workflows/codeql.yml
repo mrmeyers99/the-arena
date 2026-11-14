@@ -1,0 +1,56 @@
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Weekly scan to pick up newly published queries against unchanged code.
+    - cron: "27 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Covers .js/.jsx/.ts sources in src/ and config files.
+          - language: javascript-typescript
+            build-mode: none
+          # Scans .github/workflows for injection and permission issues.
+          - language: actions
+            build-mode: none
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+          config: |
+            paths-ignore:
+              - dist
+              - node_modules
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
