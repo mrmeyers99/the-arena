@@ -1,10 +1,8 @@
 name: Test
 
+# Called from ci.yml so its result can gate the deploys there.
 on:
-  pull_request:
-  push:
-    branches:
-      - main
+  workflow_call:
 
 permissions:
   contents: read

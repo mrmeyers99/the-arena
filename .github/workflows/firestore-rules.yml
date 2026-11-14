@@ -1,16 +1,15 @@
 name: Firestore Rules
 
+# Called from ci.yml so its result can gate the deploys there.
 on:
-  pull_request:
-  push:
-    branches:
-      - main
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
   test:
+    name: Rules tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

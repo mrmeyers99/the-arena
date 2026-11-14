@@ -41,12 +41,27 @@ jobs:
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=high
 
-  # Production deploy to Firebase Hosting. Runs only on pushes to main and only
-  # after every job listed in `needs` has succeeded. When adding new CI jobs
-  # (e.g. tests, Firestore rules), add them to `needs` so they gate the deploy.
+  test:
+    name: Test
+    uses: ./.github/workflows/test.yml
+
+  rules-test:
+    name: Firestore Rules
+    uses: ./.github/workflows/firestore-rules.yml
+
+  # Production deploys. They run only on pushes to main and only after every
+  # job listed in `needs` has succeeded. When adding new CI jobs, add them to
+  # `needs` of both deploys so they gate them.
+  deploy-rules:
+    name: Deploy Firestore Rules
+    needs: [lint, build, test, rules-test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/firestore-rules-deploy.yml
+    secrets: inherit
+
   deploy:
     name: Deploy to Firebase Hosting (live)
-    needs: [lint, build]
+    needs: [lint, build, test, rules-test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
