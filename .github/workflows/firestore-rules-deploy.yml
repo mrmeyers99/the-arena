@@ -1,0 +1,39 @@
+# Manually deploys firestore.rules and firestore.indexes.json to the live
+# project. This is intentionally NOT run on merge: the live project's rules
+# were first set up in the Firebase console, and deploying overwrites them.
+# Diff the console rules against firestore.rules before the first run.
+name: Deploy Firestore Rules
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firestore-rules-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Write service account credentials
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_COMPETITION_HUB_B047F }}
+        run: |
+          creds="$RUNNER_TEMP/firebase-service-account.json"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$creds"
+          chmod 600 "$creds"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$creds" >> "$GITHUB_ENV"
+      - name: Deploy rules and indexes
+        run: npx firebase-tools deploy --only firestore:rules,firestore:indexes --project competition-hub-b047f --non-interactive
+      - name: Remove credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/firebase-service-account.json"
