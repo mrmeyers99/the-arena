@@ -1,19 +1,7 @@
 import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, CheckSquare, Square } from 'lucide-react';
-
-// Helper to get the week number and the start of the week date
-const getWeekInfo = (d) => {
-    d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-    const day = d.getUTCDay() || 7;
-    d.setUTCDate(d.getUTCDate() + 4 - day);
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
-    const weekNo = Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
-    
-    // Get the start of the week (Sunday)
-    const firstDayOfWeek = new Date(d);
-    firstDayOfWeek.setUTCDate(d.getUTCDate() - d.getUTCDay());
-    return { year: d.getUTCFullYear(), week: weekNo, startDate: firstDayOfWeek };
-}
+import { getWeekInfo } from '../lib/dates';
+import { getCompletedTaskIdsForDate } from '../lib/tasks';
 
 const WeeklyTasks = ({ tasks, userEntries, onTaskCheck, competitionStartDate }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -38,7 +26,7 @@ const WeeklyTasks = ({ tasks, userEntries, onTaskCheck, competitionStartDate }) 
 
   const completedTasksForWeek = useMemo(() => {
     const weekDateString = weekStartDate.toISOString().split('T')[0];
-    return new Set(userEntries.filter(e => e.date === weekDateString).map(e => e.taskId));
+    return getCompletedTaskIdsForDate(userEntries, weekDateString);
   }, [userEntries, weekStartDate]);
 
   return (

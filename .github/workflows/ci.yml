@@ -9,15 +9,73 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  # Superseded PR runs are cancelled; pushes to main always run to completion
+  # so every merged commit gets a full CI result (and a deploy).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  build:
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=high
+
+  # Production deploy to Firebase Hosting. Runs only on pushes to main and only
+  # after every job listed in `needs` has succeeded. When adding new CI jobs
+  # (e.g. tests, Firestore rules), add them to `needs` so they gate the deploy.
+  deploy:
+    name: Deploy to Firebase Hosting (live)
+    needs: [lint, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: write
+    env:
+      VITE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+      VITE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+      VITE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      VITE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+      VITE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+      VITE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+      VITE_MEASUREMENT_ID: ${{ secrets.FIREBASE_MEASUREMENT_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_COMPETITION_HUB_B047F }}
+          channelId: live
+          projectId: competition-hub-b047f
