@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { CheckSquare, Square } from 'lucide-react';
 
 const OneAndDoneTasks = ({ tasks, userEntries, onTaskCheck }) => {
