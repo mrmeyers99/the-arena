@@ -38,6 +38,11 @@ export default [
     languageOptions: { globals: globals.node }
   },
   {
+    // Cloud Functions and their tests run in Node.
+    files: ['functions/**/*.js'],
+    languageOptions: { globals: globals.node }
+  },
+  {
     // Firestore rules tests run in Node (Vitest, node environment).
     files: ['tests/firestore-rules/**/*.js'],
     languageOptions: { globals: globals.node }

@@ -4,7 +4,6 @@ import {
   getAvailableTabs,
   getCompletedTaskIds,
   getCompletedTaskIdsForDate,
-  getPointsToSubtract,
   groupTasksByFrequency,
   sortByScore
 } from './tasks';
@@ -96,17 +95,6 @@ describe('getCompletedTaskIds', () => {
 
   it('ignores entries without a task id', () => {
     expect(getCompletedTaskIds([{ date: '2025-01-01' }, { taskId: '' }])).toEqual(new Set());
-  });
-});
-
-describe('getPointsToSubtract', () => {
-  it('uses the points awarded on the entry', () => {
-    expect(getPointsToSubtract({ pointsAwarded: 15 }, 10)).toBe(15);
-  });
-
-  it('falls back to the task points when none were recorded', () => {
-    expect(getPointsToSubtract({}, 10)).toBe(10);
-    expect(getPointsToSubtract({ pointsAwarded: 0 }, 10)).toBe(10);
   });
 });
 

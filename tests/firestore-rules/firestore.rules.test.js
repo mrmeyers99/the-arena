@@ -380,11 +380,13 @@ describe('participants', () => {
     );
   });
 
-  it('allows incrementing and decrementing your own score', async () => {
+  it('rejects any client change to a score, even your own', async () => {
     await seedParticipant(BOB, 10);
     const ref = doc(db(BOB), 'competitions', COMP, 'participants', BOB);
-    await assertSucceeds(updateDoc(ref, { score: increment(10) }));
-    await assertSucceeds(updateDoc(ref, { score: increment(-10) }));
+    await assertFails(updateDoc(ref, { score: increment(10) }));
+    await assertFails(updateDoc(ref, { score: increment(-10) }));
+    await assertFails(updateDoc(ref, { score: 1000000 }));
+    await assertFails(setDoc(ref, { displayName: BOB, joinedAt: new Date(), score: 1000000 }));
   });
 
   it("rejects changing another user's score", async () => {
@@ -396,12 +398,11 @@ describe('participants', () => {
     );
   });
 
-  it('rejects changing fields other than score', async () => {
+  it('rejects changing other participant fields', async () => {
     await seedParticipant(BOB, 10);
     const ref = doc(db(BOB), 'competitions', COMP, 'participants', BOB);
     await assertFails(updateDoc(ref, { displayName: 'Someone else' }));
     await assertFails(updateDoc(ref, { joinedAt: new Date('2020-01-01') }));
-    await assertFails(updateDoc(ref, { score: 'lots' }));
   });
 
   it('rejects deleting participant docs', async () => {
@@ -432,34 +433,10 @@ describe('entries', () => {
     await seedJoined(MALLORY);
   });
 
-  it("allows the app's check flow: create entry, then bump own score", async () => {
-    const f = db(BOB);
-    await assertSucceeds(setDoc(doc(f, 'competitions', COMP, 'entries', entryId(BOB)), newEntry(BOB)));
-    await assertSucceeds(
-      updateDoc(doc(f, 'competitions', COMP, 'participants', BOB), {
-        score: increment(10)
-      })
-    );
-  });
-
-  it('allows one-and-done entries keyed by <uid>_<taskId>', async () => {
-    await assertSucceeds(setDoc(doc(db(BOB), 'competitions', COMP, 'entries', `${BOB}_TASK0001`), newEntry(BOB)));
-  });
-
-  it("allows the app's uncheck flow: get, delete, decrement score", async () => {
+  // Entries are written only by the toggleTaskEntry Cloud Function (Admin
+  // SDK, which bypasses rules). Clients may read their own and nothing more.
+  it('allows reading your own entry', async () => {
     await seedEntry(BOB);
-    const f = db(BOB);
-    const ref = doc(f, 'competitions', COMP, 'entries', entryId(BOB));
-    await assertSucceeds(getDoc(ref));
-    await assertSucceeds(deleteDoc(ref));
-    await assertSucceeds(
-      updateDoc(doc(f, 'competitions', COMP, 'participants', BOB), {
-        score: increment(-10)
-      })
-    );
-  });
-
-  it('allows getting your own entry id even if it does not exist yet', async () => {
     await assertSucceeds(getDoc(doc(db(BOB), 'competitions', COMP, 'entries', entryId(BOB))));
   });
 
@@ -478,39 +455,20 @@ describe('entries', () => {
     await assertFails(getDocs(query(collection(f, 'competitions', COMP, 'entries'), where('userId', '==', BOB))));
   });
 
-  it('rejects writing an entry for another user', async () => {
-    const f = db(MALLORY);
-    // userId set to the victim
+  it('rejects creating entries from the client, even your own', async () => {
+    const f = db(BOB);
     await assertFails(setDoc(doc(f, 'competitions', COMP, 'entries', entryId(BOB)), newEntry(BOB)));
-    // own userId but the victim's doc id
-    await assertFails(setDoc(doc(f, 'competitions', COMP, 'entries', entryId(BOB)), newEntry(MALLORY)));
+    await assertFails(setDoc(doc(f, 'competitions', COMP, 'entries', `${BOB}_TASK0001`), newEntry(BOB)));
+    await assertFails(addDoc(collection(f, 'competitions', COMP, 'entries'), newEntry(BOB)));
+    await assertFails(setDoc(doc(db(MALLORY), 'competitions', COMP, 'entries', entryId(BOB)), newEntry(BOB)));
   });
 
-  it('rejects entries whose id does not match the task/date', async () => {
-    await assertFails(setDoc(doc(db(BOB), 'competitions', COMP, 'entries', `${BOB}_OTHER_2026-03-02`), newEntry(BOB)));
-    await assertFails(addDoc(collection(db(BOB), 'competitions', COMP, 'entries'), newEntry(BOB)));
-  });
-
-  it('rejects entries from non-participants', async () => {
-    await assertFails(setDoc(doc(db(ALICE), 'competitions', COMP, 'entries', entryId(ALICE)), newEntry(ALICE)));
-  });
-
-  it('rejects entries with extra fields or bad types', async () => {
-    const ref = doc(db(BOB), 'competitions', COMP, 'entries', entryId(BOB));
-    await assertFails(setDoc(ref, newEntry(BOB, { verified: true })));
-    await assertFails(setDoc(ref, newEntry(BOB, { pointsAwarded: '10' })));
-    await assertFails(setDoc(ref, newEntry(BOB, { completedAt: new Date('2020-01-01') })));
-  });
-
-  it('rejects modifying an existing entry (even your own)', async () => {
+  it('rejects modifying or deleting entries from the client, even your own', async () => {
     await seedEntry(BOB);
     const ref = doc(db(BOB), 'competitions', COMP, 'entries', entryId(BOB));
     await assertFails(updateDoc(ref, { pointsAwarded: 1000 }));
     await assertFails(setDoc(ref, newEntry(BOB, { pointsAwarded: 1000 })));
-  });
-
-  it("rejects deleting another user's entry", async () => {
-    await seedEntry(BOB);
+    await assertFails(deleteDoc(ref));
     await assertFails(deleteDoc(doc(db(MALLORY), 'competitions', COMP, 'entries', entryId(BOB))));
   });
 });

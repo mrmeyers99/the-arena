@@ -41,12 +41,46 @@ jobs:
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=high
 
+  functions:
+    name: Cloud Functions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+      # The Firestore emulator is a Java program.
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            firebase-emulators-${{ runner.os }}-
+      # Root install provides firebase-tools for the emulator.
+      - run: npm ci
+      - run: npm ci
+        working-directory: functions
+      - run: npm test
+        working-directory: functions
+      - run: PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH" npm run test:emulator
+        working-directory: functions
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: functions
+
   # Production deploy to Firebase Hosting. Runs only on pushes to main and only
   # after every job listed in `needs` has succeeded. When adding new CI jobs
   # (e.g. tests, Firestore rules), add them to `needs` so they gate the deploy.
   deploy:
     name: Deploy to Firebase Hosting (live)
-    needs: [lint, build]
+    needs: [lint, build, functions]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
@@ -72,6 +106,23 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      # The app calls the toggleTaskEntry function to score tasks, so the
+      # function must be live before the new client is.
+      - run: npm ci
+        working-directory: functions
+      - name: Write service account credentials
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_COMPETITION_HUB_B047F }}
+        run: |
+          creds="$RUNNER_TEMP/firebase-service-account.json"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$creds"
+          chmod 600 "$creds"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$creds" >> "$GITHUB_ENV"
+      - name: Deploy Cloud Functions
+        run: npx firebase-tools deploy --only functions --project competition-hub-b047f --non-interactive --force
+      - name: Remove credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/firebase-service-account.json"
       - run: npm run build
       - uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # v0
         with:
