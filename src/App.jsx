@@ -6,6 +6,9 @@ import { ArrowLeft, Award, Calendar, Crown, Eye, EyeOff, LogOut, Plus, RefreshCw
 import DailyTasks from './components/DailyTasks';
 import WeeklyTasks from './components/WeeklyTasks';
 import OneAndDoneTasks from './components/OneAndDoneTasks';
+import { formatDate, toISODateString } from './lib/dates';
+import { generateCode } from './lib/codes';
+import { buildEntryId, getAvailableTabs, getPointsToSubtract, groupTasksByFrequency, sortByScore } from './lib/tasks';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
@@ -22,30 +25,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-
-// --- Helper Functions ---
-const formatDate = (date) => {
-  if (!date) return 'N/A';
-  if (date.toDate) {
-    return date.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  }
-  return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-};
-
-const toISODateString = (date) => {
-    return new Date(date.getTime() - (date.getTimezoneOffset() * 60000 ))
-      .toISOString()
-      .split("T")[0];
-}
-
-const generateCode = (length = 6) => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = '';
-    for (let i = 0; i < length; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-};
 
 
 // --- Main App Component ---
@@ -547,9 +526,8 @@ function CompetitionView({ user, competitionId, onBack }) {
     const handleTaskCheck = async (task, date, isCompleted) => {
         const points = parseInt(task.points, 10);
         const participantRef = doc(db, 'competitions', competitionId, 'participants', user.uid);
-        const isOneAndDone = task.frequency === 'once';
         const entryDate = toISODateString(date);
-        const entryId = isOneAndDone ? `${user.uid}_${task.id}` : `${user.uid}_${task.id}_${entryDate}`;
+        const entryId = buildEntryId(user.uid, task, entryDate);
         const entryRef = doc(db, 'competitions', competitionId, 'entries', entryId);
 
         try {
@@ -566,7 +544,7 @@ function CompetitionView({ user, competitionId, onBack }) {
             } else {
                 const entrySnap = await getDoc(entryRef);
                 if (entrySnap.exists()) {
-                    const pointsToSubtract = entrySnap.data().pointsAwarded || points;
+                    const pointsToSubtract = getPointsToSubtract(entrySnap.data(), points);
                     await deleteDoc(entryRef);
                     await updateDoc(participantRef, { score: increment(-pointsToSubtract) });
                 }
@@ -633,19 +611,9 @@ function CompetitionView({ user, competitionId, onBack }) {
 }
 
 function YourTasks({ competition, userEntries, onTaskCheck, participant }) {
-  const taskGroups = useMemo(() => ({
-    daily: competition.tasks.filter(t => t.frequency === 'daily'),
-    weekly: competition.tasks.filter(t => t.frequency === 'weekly'),
-    'one-and-done': competition.tasks.filter(t => t.frequency === 'once'),
-  }), [competition.tasks]);
+  const taskGroups = useMemo(() => groupTasksByFrequency(competition.tasks), [competition.tasks]);
 
-  const availableTabs = useMemo(() => {
-      const tabs = [];
-      if (taskGroups.daily.length > 0) tabs.push('daily');
-      if (taskGroups.weekly.length > 0) tabs.push('weekly');
-      if (taskGroups['one-and-done'].length > 0) tabs.push('one-and-done');
-      return tabs;
-  }, [taskGroups]);
+  const availableTabs = useMemo(() => getAvailableTabs(taskGroups), [taskGroups]);
 
   const [activeTab, setActiveTab] = useState('daily');
 
@@ -712,14 +680,10 @@ function YourTasks({ competition, userEntries, onTaskCheck, participant }) {
 function Leaderboard({ participants, teams, teamConfig }) {
     const [activeTab, setActiveTab] = useState('individual');
 
-    const sortedParticipants = useMemo(() => {
-        return [...participants].sort((a, b) => (b.score || 0) - (a.score || 0));
-    }, [participants]);
+    const sortedParticipants = useMemo(() => sortByScore(participants), [participants]);
 
-    const sortedTeams = useMemo(() => {
-         // Team score calculation would be more complex in reality, based on member scores
-        return [...teams].sort((a, b) => (b.score || 0) - (a.score || 0));
-    }, [teams]);
+    // Team score calculation would be more complex in reality, based on member scores
+    const sortedTeams = useMemo(() => sortByScore(teams), [teams]);
 
     const hasTeams = teamConfig.mode !== 'individual';
 

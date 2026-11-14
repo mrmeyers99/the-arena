@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
 import { CheckSquare, Square } from 'lucide-react';
+import { getCompletedTaskIds } from '../lib/tasks';
 
 const OneAndDoneTasks = ({ tasks, userEntries, onTaskCheck }) => {
 
   const completedTasks = useMemo(() => {
-    return new Set(userEntries.filter(e => e.taskId).map(e => e.taskId));
+    return getCompletedTaskIds(userEntries);
   }, [userEntries]);
 
   return (

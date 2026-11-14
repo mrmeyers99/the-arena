@@ -1,14 +1,10 @@
 import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, CheckSquare, Square } from 'lucide-react';
+import { toISODateString } from '../lib/dates';
+import { getCompletedTaskIdsForDate } from '../lib/tasks';
 
 const DailyTasks = ({ tasks, userEntries, onTaskCheck, competitionStartDate }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
-
-  const toISODateString = (date) => {
-    return new Date(date.getTime() - (date.getTimezoneOffset() * 60000 ))
-      .toISOString()
-      .split("T")[0];
-  }
 
   const handlePrevDay = () => {
     const newDate = new Date(selectedDate);
@@ -27,8 +23,7 @@ const DailyTasks = ({ tasks, userEntries, onTaskCheck, competitionStartDate }) =
   const isBeforeCompetition = selectedDate < new Date(competitionStartDate);
 
   const completedTasksForDay = useMemo(() => {
-    const dateString = toISODateString(selectedDate);
-    return new Set(userEntries.filter(e => e.date === dateString).map(e => e.taskId));
+    return getCompletedTaskIdsForDate(userEntries, toISODateString(selectedDate));
   }, [userEntries, selectedDate]);
 
   return (
