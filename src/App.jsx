@@ -11,7 +11,6 @@ import {
 import {
   getFirestore,
   collection,
-  addDoc,
   doc,
   setDoc,
   getDoc,
@@ -22,12 +21,14 @@ import {
   arrayUnion,
   deleteDoc,
   serverTimestamp,
-  increment
+  increment,
+  writeBatch
 } from 'firebase/firestore';
 import {
   ArrowLeft,
   Award,
   Calendar,
+  Copy,
   Crown,
   Eye,
   EyeOff,
@@ -43,7 +44,7 @@ import DailyTasks from './components/DailyTasks';
 import WeeklyTasks from './components/WeeklyTasks';
 import OneAndDoneTasks from './components/OneAndDoneTasks';
 import { formatDate, toISODateString } from './lib/dates';
-import { generateCode } from './lib/codes';
+import { generateAccessCode, generateCode } from './lib/codes';
 import { buildEntryId, getAvailableTabs, getPointsToSubtract, groupTasksByFrequency, sortByScore } from './lib/tasks';
 
 // --- Firebase Configuration ---
@@ -66,8 +67,10 @@ const db = getFirestore(app);
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('dashboard'); // 'dashboard', 'competition'
-  const [selectedCompetitionId, setSelectedCompetitionId] = useState(null);
+  // An invite link is ?competition=<id>; open that competition directly.
+  const [initialCompetitionId] = useState(() => new URLSearchParams(window.location.search).get('competition'));
+  const [view, setView] = useState(initialCompetitionId ? 'competition' : 'dashboard'); // 'dashboard', 'competition'
+  const [selectedCompetitionId, setSelectedCompetitionId] = useState(initialCompetitionId);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -97,6 +100,7 @@ export default function App() {
   const navigateToDashboard = () => {
     setSelectedCompetitionId(null);
     setView('dashboard');
+    if (window.location.search) window.history.replaceState(null, '', window.location.pathname);
   };
 
   return (
@@ -226,17 +230,41 @@ function Dashboard({ user, onNavigateToCompetition }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const q = query(collection(db, 'competitions'));
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const comps = [];
-      querySnapshot.forEach((doc) => {
-        comps.push({ id: doc.id, ...doc.data() });
-      });
-      setCompetitions(comps);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
+    // The security rules only allow listing competitions the user may
+    // discover, so this is three queries merged by id: open/code ones, ones
+    // the user has joined, and ones they admin. Link-only competitions are
+    // therefore visible only to their members.
+    const col = collection(db, 'competitions');
+    const queries = [
+      query(col, where('accessType', 'in', ['open', 'code'])),
+      query(col, where('participantIds', 'array-contains', user.uid)),
+      query(col, where('adminIds', 'array-contains', user.uid))
+    ];
+    const results = queries.map(() => null);
+    const publish = (i, comps) => {
+      results[i] = comps;
+      if (results.every(Boolean)) {
+        const byId = new Map(results.flat().map((comp) => [comp.id, comp]));
+        setCompetitions([...byId.values()]);
+        setLoading(false);
+      }
+    };
+    const unsubscribes = queries.map((q, i) =>
+      onSnapshot(
+        q,
+        (querySnapshot) =>
+          publish(
+            i,
+            querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+          ),
+        (error) => {
+          console.error('Error loading competitions: ', error);
+          publish(i, []);
+        }
+      )
+    );
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [user.uid]);
 
   const handleCreateCompetition = async (formData) => {
     if (!formData.name || !formData.startDate || !formData.endDate) {
@@ -244,15 +272,24 @@ function Dashboard({ user, onNavigateToCompetition }) {
       return;
     }
     try {
-      const accessCode = formData.accessType === 'code' ? generateCode() : null;
-      await addDoc(collection(db, 'competitions'), {
+      // The competition doc is readable by every signed-in user, so the access
+      // code is stored separately in private/access (admin-only), written in
+      // the same batch.
+      const competitionRef = doc(collection(db, 'competitions'));
+      const batch = writeBatch(db);
+      batch.set(competitionRef, {
         ...formData,
         creatorId: user.uid,
         adminIds: [user.uid],
         createdAt: serverTimestamp(),
-        accessCode,
         participantCount: 0
       });
+      if (formData.accessType === 'code') {
+        batch.set(doc(db, 'competitions', competitionRef.id, 'private', 'access'), {
+          accessCode: generateAccessCode()
+        });
+      }
+      await batch.commit();
       setShowCreateModal(false);
     } catch (error) {
       console.error('Error creating competition: ', error);
@@ -648,8 +685,25 @@ function CompetitionView({ user, competitionId, onBack }) {
   const [userEntries, setUserEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isParticipant, setIsParticipant] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
+  const [accessCode, setAccessCode] = useState(null);
 
   const isAdmin = useMemo(() => competition?.adminIds?.includes(user.uid), [competition, user]);
+  const isCodeCompetition = competition?.accessType === 'code';
+
+  // Only admins can read the access code (see private/access in the rules).
+  useEffect(() => {
+    if (!isAdmin || !isCodeCompetition) return;
+    let cancelled = false;
+    getDoc(doc(db, 'competitions', competitionId, 'private', 'access'))
+      .then((snap) => {
+        if (!cancelled && snap.exists()) setAccessCode(snap.data().accessCode);
+      })
+      .catch((error) => console.error('Error loading access code: ', error));
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, isCodeCompetition, competitionId]);
 
   useEffect(() => {
     if (!competitionId) return;
@@ -692,25 +746,35 @@ function CompetitionView({ user, competitionId, onBack }) {
   }, [competitionId, user.uid]);
 
   const handleJoin = async () => {
+    const code = joinCode.trim().toUpperCase();
+    if (isCodeCompetition && !code) {
+      alert('Enter the access code to join.');
+      return;
+    }
     try {
-      const competitionRef = doc(db, 'competitions', competitionId);
-      const participantRef = doc(db, 'competitions', competitionId, 'participants', user.uid);
-
-      await setDoc(participantRef, {
+      // One batch so the rules can check everything together: for code
+      // competitions the access grant proves the user knows the code.
+      const batch = writeBatch(db);
+      if (isCodeCompetition) {
+        batch.set(doc(db, 'competitions', competitionId, 'accessGrants', user.uid), { accessCode: code });
+      }
+      batch.set(doc(db, 'competitions', competitionId, 'participants', user.uid), {
         displayName: user.displayName,
         joinedAt: serverTimestamp(),
         score: 0
       });
-
-      await updateDoc(competitionRef, {
+      batch.update(doc(db, 'competitions', competitionId), {
         participantIds: arrayUnion(user.uid),
         participantCount: increment(1)
       });
+      await batch.commit();
     } catch (error) {
       console.error('Error joining competition: ', error);
-      alert('Failed to join.');
+      alert(isCodeCompetition ? 'Failed to join. Check the access code and try again.' : 'Failed to join.');
     }
   };
+
+  const inviteLink = `${window.location.origin}${window.location.pathname}?competition=${competitionId}`;
 
   const handleTaskCheck = async (task, date, isCompleted) => {
     const points = parseInt(task.points, 10);
@@ -780,6 +844,16 @@ function CompetitionView({ user, competitionId, onBack }) {
             </div>
           </div>
           <div>
+            {!isParticipant && isCodeCompetition && (
+              <input
+                type="text"
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value)}
+                placeholder="Access Code"
+                aria-label="Access Code"
+                className="mr-2 bg-gray-700 text-white rounded-lg py-2 px-3 uppercase"
+              />
+            )}
             {!isParticipant && (
               <button
                 onClick={handleJoin}
@@ -795,6 +869,27 @@ function CompetitionView({ user, competitionId, onBack }) {
             )}
           </div>
         </div>
+        {isAdmin && (
+          <div className="mt-4 pt-4 border-t border-gray-700 text-sm text-gray-300 space-y-2">
+            <div className="flex items-center flex-wrap gap-2">
+              <span className="text-gray-400">Invite link:</span>
+              <code className="bg-gray-900 px-2 py-1 rounded break-all">{inviteLink}</code>
+              <button
+                onClick={() => navigator.clipboard?.writeText(inviteLink)}
+                className="text-indigo-400 hover:text-indigo-300"
+                aria-label="Copy invite link"
+              >
+                <Copy size={16} />
+              </button>
+            </div>
+            {isCodeCompetition && (
+              <div className="flex items-center gap-2">
+                <span className="text-gray-400">Access code:</span>
+                <code className="bg-gray-900 px-2 py-1 rounded tracking-widest">{accessCode ?? '…'}</code>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Main content tabs would go here */}
