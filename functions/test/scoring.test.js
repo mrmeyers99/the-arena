@@ -23,8 +23,11 @@ beforeEach(async () => {
   await clear();
   await comp.set({
     name: 'C',
+    startDate: '2026-01-01',
+    endDate: '2026-02-11',
     tasks: [
       { id: 'run', name: 'Run', points: '10', frequency: 'daily' },
+      { id: 'walk', name: 'Walk', points: 20, frequency: 'weekly' },
       { id: 'big', name: 'Big', points: 50, frequency: 'once' }
     ]
   });
@@ -78,4 +81,22 @@ test('rejects non-participants, unknown tasks and future dates', async () => {
   });
   await assert.rejects(toggleTaskEntry(db, 'alice', req({ completed: 'yes' }), now), { code: 'invalid-argument' });
   assert.equal(await score(), 0);
+});
+
+test('rejects dates outside the competition, so past days cannot be farmed', async () => {
+  await assert.rejects(toggleTaskEntry(db, 'alice', req({ date: '2025-12-31' }), now), { code: 'invalid-argument' });
+  await assert.rejects(toggleTaskEntry(db, 'alice', req({ date: '0001-01-01' }), now), { code: 'invalid-argument' });
+  const late = new Date('2026-03-01T12:00:00Z');
+  await assert.rejects(toggleTaskEntry(db, 'alice', req({ date: '2026-02-12' }), late), { code: 'invalid-argument' });
+  assert.equal(await score(), 0);
+});
+
+test('a weekly task scores once per week', async () => {
+  // 2026-01-04 is a Sunday, the key for the week of 2026-01-05.
+  await toggleTaskEntry(db, 'alice', req({ taskId: 'walk', date: '2026-01-04' }), now);
+  await assert.rejects(toggleTaskEntry(db, 'alice', req({ taskId: 'walk', date: '2026-01-05' }), now), {
+    code: 'invalid-argument'
+  });
+  await toggleTaskEntry(db, 'alice', req({ taskId: 'walk', date: '2026-01-04' }), now);
+  assert.equal(await score(), 20);
 });

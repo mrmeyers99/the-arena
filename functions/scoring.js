@@ -2,7 +2,7 @@
 // (see firestore.rules); they call toggleTaskEntry, which runs this.
 
 import { FieldValue } from 'firebase-admin/firestore';
-import { buildEntryId, isFutureDate, taskPoints, validateRequest } from './validate.js';
+import { buildEntryId, checkEntryDate, isFutureDate, taskPoints, validateRequest } from './validate.js';
 
 // Thrown for requests that should be rejected. `code` is a Functions
 // HttpsError code.
@@ -41,6 +41,8 @@ export const toggleTaskEntry = async (db, uid, data, now = new Date()) => {
       // Already recorded: nothing to do (also makes retries safe).
       if (entrySnap.exists) return { score: currentScore };
       if (isFutureDate(date, now)) throw new ScoringError('invalid-argument', 'Date is in the future.');
+      const dateProblem = checkEntryDate(task, date, competitionSnap.get('startDate'), competitionSnap.get('endDate'));
+      if (dateProblem) throw new ScoringError('invalid-argument', dateProblem);
       const points = taskPoints(task);
       if (points === null) throw new ScoringError('failed-precondition', 'Task has no valid points value.');
 

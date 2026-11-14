@@ -31,6 +31,27 @@ export const isFutureDate = (date, now = new Date()) => {
   return date > latest;
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const addDays = (date, days) => new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
+const isDateString = (value) => typeof value === 'string' && DATE_RE.test(value);
+
+// Check that an entry's date fits the task and the competition window.
+// Returns an error message, or null when the date is allowed.
+//
+// Weekly entries are keyed by the Sunday the app uses as the week's key
+// (src/lib/dates.js getWeekInfo), so one week can only score once. That
+// Sunday can fall up to 6 days before the competition starts.
+export const checkEntryDate = (task, date, startDate, endDate) => {
+  if (!isDateString(startDate) || !isDateString(endDate)) return 'Competition has no valid start and end dates.';
+  if (task.frequency === 'weekly') {
+    if (new Date(`${date}T00:00:00Z`).getUTCDay() !== 0) return 'Weekly entries must use the week-start Sunday.';
+    if (addDays(date, 6) < startDate || date > endDate) return 'Date is outside the competition.';
+    return null;
+  }
+  if (date < startDate || date > endDate) return 'Date is outside the competition.';
+  return null;
+};
+
 // Points for a task as defined by the competition (never by the caller).
 // Returns null when the value isn't a usable whole number.
 export const taskPoints = (task) => {

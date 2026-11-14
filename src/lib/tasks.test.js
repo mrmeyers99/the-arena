@@ -4,6 +4,7 @@ import {
   getAvailableTabs,
   getCompletedTaskIds,
   getCompletedTaskIdsForDate,
+  getEntryDate,
   groupTasksByFrequency,
   sortByScore
 } from './tasks';
@@ -95,6 +96,28 @@ describe('getCompletedTaskIds', () => {
 
   it('ignores entries without a task id', () => {
     expect(getCompletedTaskIds([{ date: '2025-01-01' }, { taskId: '' }])).toEqual(new Set());
+  });
+});
+
+describe('getEntryDate', () => {
+  // Week key for the week of 2025-01-13, as getWeekInfo returns it.
+  const weekStart = new Date('2025-01-12T00:00:00Z');
+
+  it('uses the UTC week-start Sunday for weekly tasks', () => {
+    expect(getEntryDate(weekly, weekStart)).toBe('2025-01-12');
+  });
+
+  it('keeps the Sunday for users west of UTC', () => {
+    // US Eastern: toISODateString would give the Saturday before.
+    const date = new Date(weekStart);
+    date.getTimezoneOffset = () => 300;
+    expect(getEntryDate(weekly, date)).toBe('2025-01-12');
+  });
+
+  it('uses the local date for daily and one-and-done tasks', () => {
+    const date = new Date('2025-01-15T12:00:00Z');
+    expect(getEntryDate(daily, date)).toBe('2025-01-15');
+    expect(getEntryDate(once, date)).toBe('2025-01-15');
   });
 });
 

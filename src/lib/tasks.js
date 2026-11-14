@@ -1,5 +1,7 @@
 // Pure helpers for competition tasks, entries and scoring.
 
+import { toISODateString } from './dates';
+
 // Split a competition's tasks into the three task tabs.
 export const groupTasksByFrequency = (tasks) => ({
   daily: tasks.filter((t) => t.frequency === 'daily'),
@@ -22,6 +24,15 @@ export const getAvailableTabs = (taskGroups) => {
 // buildEntryId in sync with this.
 export const buildEntryId = (userId, task, entryDate) => {
   return task.frequency === 'once' ? `${userId}_${task.id}` : `${userId}_${task.id}_${entryDate}`;
+};
+
+// YYYY-MM-DD date to record a completion under. Weekly tasks use the week's
+// key, the UTC Sunday from getWeekInfo, which is also what WeeklyTasks looks
+// up. Converting it to a local date would give Saturday west of UTC. Other
+// tasks use the user's local date.
+export const getEntryDate = (task, date) => {
+  if (task.frequency === 'weekly') return date.toISOString().slice(0, 10);
+  return toISODateString(date);
 };
 
 // Ids of tasks with an entry on the given YYYY-MM-DD date.

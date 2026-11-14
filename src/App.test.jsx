@@ -268,6 +268,18 @@ describe('App when signed in', () => {
     );
   });
 
+  it('records a weekly task under the week-start Sunday', async () => {
+    await openCompetition();
+    fireEvent.click(screen.getByRole('button', { name: 'WEEKLY TASKS' }));
+    const checkbox = screen.getByText('Long walk').closest('div.flex').querySelector('button');
+    await act(async () => {
+      fireEvent.click(checkbox);
+    });
+    expect(callable).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'w1', date: '2025-01-12', completed: true })
+    );
+  });
+
   it('tells the user when the scoring function fails', async () => {
     callable.mockRejectedValueOnce(new Error('permission-denied'));
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});

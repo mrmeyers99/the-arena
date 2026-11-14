@@ -41,9 +41,9 @@ import {
 import DailyTasks from './components/DailyTasks';
 import WeeklyTasks from './components/WeeklyTasks';
 import OneAndDoneTasks from './components/OneAndDoneTasks';
-import { formatDate, toISODateString } from './lib/dates';
+import { formatDate } from './lib/dates';
 import { generateAccessCode, generateCode } from './lib/codes';
-import { getAvailableTabs, groupTasksByFrequency, sortByScore } from './lib/tasks';
+import { getAvailableTabs, getEntryDate, groupTasksByFrequency, sortByScore } from './lib/tasks';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
@@ -782,7 +782,7 @@ function CompetitionView({ user, competitionId, onBack }) {
       await toggleTaskEntry({
         competitionId,
         taskId: task.id,
-        date: toISODateString(date),
+        date: getEntryDate(task, date),
         completed: isCompleted,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       });
