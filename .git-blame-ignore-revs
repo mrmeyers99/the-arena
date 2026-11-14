@@ -1,0 +1,5 @@
+# Revisions to skip in `git blame` (bulk formatting changes).
+# Enable locally with: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Format the codebase with Prettier
+8a0bb0d675d53761a3262bf0a1f1b8a223bc873d
