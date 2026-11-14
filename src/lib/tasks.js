@@ -1,5 +1,7 @@
 // Pure helpers for competition tasks, entries and scoring.
 
+import { toISODateString } from './dates';
+
 // Split a competition's tasks into the three task tabs.
 export const groupTasksByFrequency = (tasks) => ({
   daily: tasks.filter((t) => t.frequency === 'daily'),
@@ -17,9 +19,20 @@ export const getAvailableTabs = (taskGroups) => {
 };
 
 // Firestore document id for a task completion entry. One-and-done tasks have a
-// single entry per user; recurring tasks have one per period date.
+// single entry per user; recurring tasks have one per period date. Entries are
+// written by the toggleTaskEntry Cloud Function; keep functions/validate.js
+// buildEntryId in sync with this.
 export const buildEntryId = (userId, task, entryDate) => {
   return task.frequency === 'once' ? `${userId}_${task.id}` : `${userId}_${task.id}_${entryDate}`;
+};
+
+// YYYY-MM-DD date to record a completion under. Weekly tasks use the week's
+// key, the UTC Sunday from getWeekInfo, which is also what WeeklyTasks looks
+// up. Converting it to a local date would give Saturday west of UTC. Other
+// tasks use the user's local date.
+export const getEntryDate = (task, date) => {
+  if (task.frequency === 'weekly') return date.toISOString().slice(0, 10);
+  return toISODateString(date);
 };
 
 // Ids of tasks with an entry on the given YYYY-MM-DD date.
@@ -30,12 +43,6 @@ export const getCompletedTaskIdsForDate = (entries, dateString) => {
 // Ids of every task with an entry, regardless of date.
 export const getCompletedTaskIds = (entries) => {
   return new Set(entries.filter((e) => e.taskId).map((e) => e.taskId));
-};
-
-// Points to remove when a completion is undone: what was awarded, falling back
-// to the task's current points.
-export const getPointsToSubtract = (entryData, points) => {
-  return entryData.pointsAwarded || points;
 };
 
 // Sort participants or teams by score, highest first (missing score = 0).

@@ -3,7 +3,9 @@ rules_version = '2';
 // Firestore security rules for The Arena.
 //
 // These rules allow exactly the reads and writes that src/App.jsx performs
-// today, and nothing else. Anything not matched below is denied by default.
+// today, and nothing else. Task entries and scores are written only by the
+// toggleTaskEntry Cloud Function (functions/), which bypasses these rules.
+// Anything not matched below is denied by default.
 // Tests live in tests/firestore-rules/ and run against the emulator with
 // `npm run test:rules`.
 service cloud.firestore {
@@ -177,14 +179,10 @@ service cloud.firestore {
           && request.resource.data.joinedAt == request.time
           && request.resource.data.score == 0;
 
-        // KNOWN GAP: the client computes its own score, so a user can set their
-        // own score to any number. Fixing this needs scoring to move to a
-        // trusted backend (e.g. a Cloud Function on entries). Until then we at
-        // least restrict the change to the caller's own doc and the score field.
-        allow update: if signedIn()
-          && userId == uid()
-          && changedKeys().hasOnly(['score'])
-          && request.resource.data.score is number;
+        // Scores are only changed by the toggleTaskEntry Cloud Function
+        // (functions/scoring.js), which uses the Admin SDK and bypasses these
+        // rules. Clients can never edit a participant doc.
+        allow update: if false;
 
         allow delete: if false;
       }
@@ -201,40 +199,13 @@ service cloud.firestore {
       //
       // One doc per completed task occurrence. Id is "<uid>_<taskId>" for
       // one-and-done tasks or "<uid>_<taskId>_<YYYY-MM-DD>" otherwise.
-      // Written with setDoc() on check, read with getDoc() and removed with
-      // deleteDoc() on uncheck, and listed with where('userId', '==', uid).
+      // Written and deleted only by the toggleTaskEntry Cloud Function, so
+      // pointsAwarded always comes from the competition's task definition.
+      // Clients read their own entries with where('userId', '==', uid).
       match /entries/{entryId} {
-        // Own entries only. A get on a doc that does not exist yet is allowed
-        // when the id belongs to the caller (resource is null in that case).
-        allow get: if signedIn()
-          && (resource == null
-              ? entryId.split('_')[0] == uid()
-              : resource.data.userId == uid());
+        allow get: if signedIn() && resource.data.userId == uid();
         allow list: if signedIn() && resource.data.userId == uid();
-
-        allow create: if signedIn()
-          && isParticipant(competitionId)
-          && validNewEntry(request.resource.data);
-
-        // Entries are immutable: uncheck deletes, re-check creates a new doc.
-        allow update: if false;
-
-        allow delete: if signedIn() && resource.data.userId == uid();
-
-        function validNewEntry(data) {
-          return data.keys().hasOnly(['userId', 'taskId', 'date', 'completedAt',
-                                      'timezone', 'pointsAwarded'])
-            && data.keys().hasAll(['userId', 'taskId', 'date', 'completedAt',
-                                   'pointsAwarded'])
-            && data.userId == uid()
-            && data.taskId is string
-            && data.date is string
-            && (!('timezone' in data) || data.timezone is string)
-            && data.completedAt == request.time
-            && data.pointsAwarded is number
-            && (entryId == uid() + '_' + data.taskId
-                || entryId == uid() + '_' + data.taskId + '_' + data.date);
-        }
+        allow write: if false;
       }
     }
   }

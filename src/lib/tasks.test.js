@@ -4,7 +4,7 @@ import {
   getAvailableTabs,
   getCompletedTaskIds,
   getCompletedTaskIdsForDate,
-  getPointsToSubtract,
+  getEntryDate,
   groupTasksByFrequency,
   sortByScore
 } from './tasks';
@@ -99,14 +99,25 @@ describe('getCompletedTaskIds', () => {
   });
 });
 
-describe('getPointsToSubtract', () => {
-  it('uses the points awarded on the entry', () => {
-    expect(getPointsToSubtract({ pointsAwarded: 15 }, 10)).toBe(15);
+describe('getEntryDate', () => {
+  // Week key for the week of 2025-01-13, as getWeekInfo returns it.
+  const weekStart = new Date('2025-01-12T00:00:00Z');
+
+  it('uses the UTC week-start Sunday for weekly tasks', () => {
+    expect(getEntryDate(weekly, weekStart)).toBe('2025-01-12');
   });
 
-  it('falls back to the task points when none were recorded', () => {
-    expect(getPointsToSubtract({}, 10)).toBe(10);
-    expect(getPointsToSubtract({ pointsAwarded: 0 }, 10)).toBe(10);
+  it('keeps the Sunday for users west of UTC', () => {
+    // US Eastern: toISODateString would give the Saturday before.
+    const date = new Date(weekStart);
+    date.getTimezoneOffset = () => 300;
+    expect(getEntryDate(weekly, date)).toBe('2025-01-12');
+  });
+
+  it('uses the local date for daily and one-and-done tasks', () => {
+    const date = new Date('2025-01-15T12:00:00Z');
+    expect(getEntryDate(daily, date)).toBe('2025-01-15');
+    expect(getEntryDate(once, date)).toBe('2025-01-15');
   });
 });
 

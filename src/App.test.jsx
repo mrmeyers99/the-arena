@@ -21,6 +21,12 @@ vi.mock('firebase/auth', () => ({
   updateProfile: vi.fn(async () => {})
 }));
 
+const callable = vi.hoisted(() => vi.fn(async () => ({ data: {} })));
+vi.mock('firebase/functions', () => ({
+  getFunctions: vi.fn(() => ({})),
+  httpsCallable: vi.fn(() => callable)
+}));
+
 vi.mock('firebase/firestore', () => {
   const makeDoc = (path, data) => ({
     id: path.split('/').pop(),
@@ -62,7 +68,6 @@ vi.mock('firebase/firestore', () => {
     }),
     setDoc: vi.fn(async () => {}),
     updateDoc: vi.fn(async () => {}),
-    deleteDoc: vi.fn(async () => {}),
     arrayUnion: vi.fn((...values) => ({ arrayUnion: values })),
     increment: vi.fn((n) => ({ increment: n })),
     serverTimestamp: vi.fn(() => 'SERVER_TIMESTAMP')
@@ -234,40 +239,59 @@ describe('App when signed in', () => {
     expect(teams[1]).toContain('Red');
   });
 
-  it('records a daily task completion with a dated entry id', async () => {
+  it('records a daily task completion through the scoring function', async () => {
     await openCompetition();
     expect(screen.getByText('Stretch')).toBeInTheDocument();
     const checkbox = screen.getByText('Stretch').closest('div.flex').querySelector('button');
     await act(async () => {
       fireEvent.click(checkbox);
     });
-    expect(firestore.doc).toHaveBeenCalledWith(expect.anything(), 'competitions', 'c1', 'entries', 'u1_d1_2025-01-15');
-    expect(firestore.setDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'competitions/c1/entries/u1_d1_2025-01-15' }),
-      expect.objectContaining({ userId: 'u1', taskId: 'd1', date: '2025-01-15', pointsAwarded: 5 })
+    expect(callable).toHaveBeenCalledWith(
+      expect.objectContaining({ competitionId: 'c1', taskId: 'd1', date: '2025-01-15', completed: true })
     );
-    expect(firestore.updateDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'competitions/c1/participants/u1' }),
-      { score: { increment: 5 } }
-    );
+    // The client never sends points or writes scores itself.
+    expect(callable.mock.calls[0][0]).not.toHaveProperty('points');
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+    expect(firestore.updateDoc).not.toHaveBeenCalled();
   });
 
-  it('removes a one-and-done completion and subtracts the awarded points', async () => {
+  it('removes a one-and-done completion through the scoring function', async () => {
     store.collections['competitions/c1/entries'] = { u1_o1: { taskId: 'o1', date: '2025-01-10' } };
-    store.docs['competitions/c1/entries/u1_o1'] = { taskId: 'o1', pointsAwarded: 45 };
     await openCompetition();
     fireEvent.click(screen.getByRole('button', { name: 'ONE-AND-DONE' }));
     const checkbox = screen.getByText('Run a 5k').closest('div.flex').querySelector('button');
     await act(async () => {
       fireEvent.click(checkbox);
     });
-    expect(firestore.deleteDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'competitions/c1/entries/u1_o1' })
+    expect(callable).toHaveBeenCalledWith(
+      expect.objectContaining({ competitionId: 'c1', taskId: 'o1', completed: false })
     );
-    expect(firestore.updateDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'competitions/c1/participants/u1' }),
-      { score: { increment: -45 } }
+  });
+
+  it('records a weekly task under the week-start Sunday', async () => {
+    await openCompetition();
+    fireEvent.click(screen.getByRole('button', { name: 'WEEKLY TASKS' }));
+    const checkbox = screen.getByText('Long walk').closest('div.flex').querySelector('button');
+    await act(async () => {
+      fireEvent.click(checkbox);
+    });
+    expect(callable).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'w1', date: '2025-01-12', completed: true })
     );
+  });
+
+  it('tells the user when the scoring function fails', async () => {
+    callable.mockRejectedValueOnce(new Error('permission-denied'));
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await openCompetition();
+    const checkbox = screen.getByText('Stretch').closest('div.flex').querySelector('button');
+    await act(async () => {
+      fireEvent.click(checkbox);
+    });
+    expect(alertSpy).toHaveBeenCalledWith('Failed to update task.');
+    alertSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it('shows weekly tasks in their tab', async () => {

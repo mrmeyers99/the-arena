@@ -12,18 +12,16 @@ import {
   getFirestore,
   collection,
   doc,
-  setDoc,
   getDoc,
   onSnapshot,
   query,
   where,
-  updateDoc,
   arrayUnion,
-  deleteDoc,
   serverTimestamp,
   increment,
   writeBatch
 } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   ArrowLeft,
   Award,
@@ -43,9 +41,9 @@ import {
 import DailyTasks from './components/DailyTasks';
 import WeeklyTasks from './components/WeeklyTasks';
 import OneAndDoneTasks from './components/OneAndDoneTasks';
-import { formatDate, toISODateString } from './lib/dates';
+import { formatDate } from './lib/dates';
 import { generateAccessCode, generateCode } from './lib/codes';
-import { buildEntryId, getAvailableTabs, getPointsToSubtract, groupTasksByFrequency, sortByScore } from './lib/tasks';
+import { getAvailableTabs, getEntryDate, groupTasksByFrequency, sortByScore } from './lib/tasks';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
@@ -62,6 +60,9 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+// Entries and scores are written only by this Cloud Function (functions/),
+// which takes each task's points from the competition, not from the client.
+const toggleTaskEntry = httpsCallable(getFunctions(app), 'toggleTaskEntry');
 
 // --- Main App Component ---
 export default function App() {
@@ -777,31 +778,14 @@ function CompetitionView({ user, competitionId, onBack }) {
   const inviteLink = `${window.location.origin}${window.location.pathname}?competition=${competitionId}`;
 
   const handleTaskCheck = async (task, date, isCompleted) => {
-    const points = parseInt(task.points, 10);
-    const participantRef = doc(db, 'competitions', competitionId, 'participants', user.uid);
-    const entryDate = toISODateString(date);
-    const entryId = buildEntryId(user.uid, task, entryDate);
-    const entryRef = doc(db, 'competitions', competitionId, 'entries', entryId);
-
     try {
-      if (isCompleted) {
-        await setDoc(entryRef, {
-          userId: user.uid,
-          taskId: task.id,
-          date: entryDate,
-          completedAt: serverTimestamp(),
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          pointsAwarded: points
-        });
-        await updateDoc(participantRef, { score: increment(points) });
-      } else {
-        const entrySnap = await getDoc(entryRef);
-        if (entrySnap.exists()) {
-          const pointsToSubtract = getPointsToSubtract(entrySnap.data(), points);
-          await deleteDoc(entryRef);
-          await updateDoc(participantRef, { score: increment(-pointsToSubtract) });
-        }
-      }
+      await toggleTaskEntry({
+        competitionId,
+        taskId: task.id,
+        date: getEntryDate(task, date),
+        completed: isCompleted,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      });
     } catch (error) {
       console.error('Error updating task entry:', error);
       alert('Failed to update task.');
