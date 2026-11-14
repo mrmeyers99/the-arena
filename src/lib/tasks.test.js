@@ -6,7 +6,7 @@ import {
   getCompletedTaskIdsForDate,
   getPointsToSubtract,
   groupTasksByFrequency,
-  sortByScore,
+  sortByScore
 } from './tasks';
 
 const daily = { id: 'd1', frequency: 'daily' };
@@ -19,7 +19,7 @@ describe('groupTasksByFrequency', () => {
     expect(groupTasksByFrequency([daily, weekly, once, daily2])).toEqual({
       daily: [daily, daily2],
       weekly: [weekly],
-      'one-and-done': [once],
+      'one-and-done': [once]
     });
   });
 
@@ -37,11 +37,7 @@ describe('groupTasksByFrequency', () => {
 
 describe('getAvailableTabs', () => {
   it('lists every non-empty group in display order', () => {
-    expect(getAvailableTabs(groupTasksByFrequency([once, weekly, daily]))).toEqual([
-      'daily',
-      'weekly',
-      'one-and-done',
-    ]);
+    expect(getAvailableTabs(groupTasksByFrequency([once, weekly, daily]))).toEqual(['daily', 'weekly', 'one-and-done']);
   });
 
   it('skips empty groups', () => {
@@ -74,7 +70,7 @@ describe('getCompletedTaskIdsForDate', () => {
   const entries = [
     { taskId: 'd1', date: '2025-01-01' },
     { taskId: 'd2', date: '2025-01-01' },
-    { taskId: 'd1', date: '2025-01-02' },
+    { taskId: 'd1', date: '2025-01-02' }
   ];
 
   it('returns ids of tasks completed on that date', () => {
@@ -93,7 +89,7 @@ describe('getCompletedTaskIds', () => {
     const entries = [
       { taskId: 'o1', date: '2025-01-01' },
       { taskId: 'd1', date: '2025-01-02' },
-      { taskId: 'o1', date: '2025-01-03' },
+      { taskId: 'o1', date: '2025-01-03' }
     ];
     expect(getCompletedTaskIds(entries)).toEqual(new Set(['o1', 'd1']));
   });
@@ -119,23 +115,30 @@ describe('sortByScore', () => {
     const sorted = sortByScore([
       { id: 'a', score: 5 },
       { id: 'b', score: 20 },
-      { id: 'c', score: 10 },
+      { id: 'c', score: 10 }
     ]);
-    expect(sorted.map(p => p.id)).toEqual(['b', 'c', 'a']);
+    expect(sorted.map((p) => p.id)).toEqual(['b', 'c', 'a']);
   });
 
   it('treats a missing score as zero', () => {
     const sorted = sortByScore([{ id: 'a' }, { id: 'b', score: 1 }, { id: 'c', score: -1 }]);
-    expect(sorted.map(p => p.id)).toEqual(['b', 'a', 'c']);
+    expect(sorted.map((p) => p.id)).toEqual(['b', 'a', 'c']);
   });
 
   it('keeps the original order for ties', () => {
-    const sorted = sortByScore([{ id: 'a', score: 1 }, { id: 'b', score: 1 }, { id: 'c', score: 2 }]);
-    expect(sorted.map(p => p.id)).toEqual(['c', 'a', 'b']);
+    const sorted = sortByScore([
+      { id: 'a', score: 1 },
+      { id: 'b', score: 1 },
+      { id: 'c', score: 2 }
+    ]);
+    expect(sorted.map((p) => p.id)).toEqual(['c', 'a', 'b']);
   });
 
   it('does not mutate the input', () => {
-    const input = [{ id: 'a', score: 1 }, { id: 'b', score: 2 }];
+    const input = [
+      { id: 'a', score: 1 },
+      { id: 'b', score: 2 }
+    ];
     const copy = [...input];
     sortByScore(input);
     expect(input).toEqual(copy);

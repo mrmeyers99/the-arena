@@ -14,9 +14,7 @@ export const formatDate = (date) => {
 
 // Return the local calendar date of `date` as YYYY-MM-DD.
 export const toISODateString = (date) => {
-  return new Date(date.getTime() - (date.getTimezoneOffset() * 60000))
-    .toISOString()
-    .split('T')[0];
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().split('T')[0];
 };
 
 // Get the ISO-8601 week number/year for a date, plus the Sunday that starts
@@ -26,7 +24,7 @@ export const getWeekInfo = (d) => {
   const day = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - day);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  const weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
 
   // Get the start of the week (Sunday)
   const firstDayOfWeek = new Date(d);

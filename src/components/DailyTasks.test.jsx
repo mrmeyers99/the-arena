@@ -4,7 +4,7 @@ import DailyTasks from './DailyTasks';
 
 const tasks = [
   { id: 't1', name: 'Drink water', points: 5, frequency: 'daily' },
-  { id: 't2', name: 'Go for a run', points: 10, frequency: 'daily' },
+  { id: 't2', name: 'Go for a run', points: 10, frequency: 'daily' }
 ];
 
 const renderDaily = (props = {}) => {
@@ -38,7 +38,7 @@ describe('DailyTasks', () => {
     vi.useRealTimers();
   });
 
-  it('lists each task with its points and today\'s date', () => {
+  it("lists each task with its points and today's date", () => {
     renderDaily();
     expect(screen.getByText('Daily Tasks')).toBeInTheDocument();
     expect(screen.getByText('Drink water')).toBeInTheDocument();
@@ -62,8 +62,8 @@ describe('DailyTasks', () => {
     const { onTaskCheck } = renderDaily({
       userEntries: [
         { taskId: 't1', date: '2025-01-15' },
-        { taskId: 't2', date: '2025-01-14' },
-      ],
+        { taskId: 't2', date: '2025-01-14' }
+      ]
     });
     const { checkboxes } = getNavButtons();
     fireEvent.click(checkboxes[0]);
@@ -90,7 +90,7 @@ describe('DailyTasks', () => {
     expect(screen.getByText('2025-01-16')).toBeInTheDocument();
     const { next, checkboxes } = getNavButtons();
     expect(next).toBeDisabled();
-    checkboxes.forEach(cb => expect(cb).toBeDisabled());
+    checkboxes.forEach((cb) => expect(cb).toBeDisabled());
   });
 
   it('disables moving back before the competition starts', () => {

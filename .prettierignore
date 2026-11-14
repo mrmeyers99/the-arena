@@ -1,0 +1,8 @@
+dist
+coverage
+package-lock.json
+public/assets
+.firebase
+# Workflow files are edited by several concurrent PRs; keep them out of the
+# formatting check (GitHub validates their syntax).
+.github/workflows

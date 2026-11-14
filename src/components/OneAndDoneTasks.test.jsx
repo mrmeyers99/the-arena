@@ -4,7 +4,7 @@ import OneAndDoneTasks from './OneAndDoneTasks';
 
 const tasks = [
   { id: 'o1', name: 'Run a 5k', points: 50, frequency: 'once' },
-  { id: 'o2', name: 'Sign up for a gym', points: 25, frequency: 'once' },
+  { id: 'o2', name: 'Sign up for a gym', points: 25, frequency: 'once' }
 ];
 
 const renderOnce = (userEntries = []) => {
