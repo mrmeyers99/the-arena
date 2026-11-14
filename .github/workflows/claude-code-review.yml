@@ -47,8 +47,19 @@ jobs:
             way to deliver the review is by posting it to the PR:
             - For issues tied to specific lines, use
               mcp__github_inline_comment__create_inline_comment.
-            - You MUST always finish by posting exactly one top-level summary
-              comment with `gh pr comment ${{ github.event.pull_request.number }} --body "..."`,
-              even when there are no issues (then just say the PR looks good and why).
+            - You MUST always finish by posting exactly one top-level summary,
+              in one of two ways:
+              - If there are NO blocking issues, approve the PR and put the
+                summary in the approval:
+                `gh pr review ${{ github.event.pull_request.number }} --approve --body "..."`.
+                Non-blocking suggestions are fine to mention in the summary.
+              - Otherwise, post the summary as a comment with
+                `gh pr comment ${{ github.event.pull_request.number }} --body "..."`
+                and clearly list the blocking issues.
+
+            A blocking issue is one that should stop the merge: a bug, a
+            security problem, a real performance regression, or broken
+            behavior. Readability and maintainability notes are not blocking
+            unless they hide a bug.
           claude_args: |
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
