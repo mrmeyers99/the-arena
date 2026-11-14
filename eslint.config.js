@@ -40,6 +40,11 @@ export default [
     languageOptions: { globals: globals.node },
   },
   {
+    // Firestore rules tests run in Node (Vitest, node environment).
+    files: ["tests/firestore-rules/**/*.js"],
+    languageOptions: { globals: globals.node },
+  },
+  {
     // Vitest test files and setup (vitest `globals: true`).
     files: ["src/**/*.test.{js,jsx}", "src/test/**/*.{js,jsx}"],
     languageOptions: { globals: globals.vitest },

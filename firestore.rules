@@ -1,0 +1,165 @@
+rules_version = '2';
+
+// Firestore security rules for The Arena.
+//
+// These rules allow exactly the reads and writes that src/App.jsx performs
+// today, and nothing else. Anything not matched below is denied by default.
+// Tests live in tests/firestore-rules/ and run against the emulator with
+// `npm run test:rules`.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helpers ----------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    // Keys changed by an update (added, removed or modified).
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function isParticipant(competitionId) {
+      return exists(/databases/$(database)/documents/competitions/$(competitionId)/participants/$(uid()));
+    }
+
+    // ---------- competitions/{competitionId} ----------
+    //
+    // Created from the dashboard with addDoc(). The only update the app makes
+    // is the "join" step: arrayUnion(uid) on participantIds and
+    // increment(1) on participantCount, done by the joining user (who is
+    // usually NOT the creator). The app never edits or deletes competitions.
+    match /competitions/{competitionId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn() && validNewCompetition(request.resource.data);
+
+      allow update: if signedIn() && isJoin();
+
+      // No client-side delete in the app today.
+      allow delete: if false;
+
+      function validNewCompetition(data) {
+        return data.keys().hasAll(['name', 'startDate', 'endDate', 'accessType',
+                                   'teamConfig', 'tasks', 'creatorId', 'adminIds',
+                                   'createdAt', 'participantCount'])
+          && data.keys().hasOnly(['name', 'description', 'startDate', 'endDate',
+                                  'accessType', 'teamConfig', 'tasks', 'creatorId',
+                                  'adminIds', 'createdAt', 'accessCode',
+                                  'participantCount'])
+          && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+          && (!('description' in data) || data.description is string)
+          && data.startDate is string
+          && data.endDate is string
+          && data.accessType in ['open', 'code', 'link']
+          && (!('accessCode' in data) || data.accessCode == null || data.accessCode is string)
+          && data.teamConfig is map
+          && data.tasks is list
+          // The creator must be the caller and the sole initial admin.
+          && data.creatorId == uid()
+          && data.adminIds == [uid()]
+          && data.createdAt == request.time
+          // Counters start at zero; participantIds is only added by joins.
+          && data.participantCount == 0;
+      }
+
+      // A user adds exactly themselves to participantIds and bumps the count
+      // by exactly one. They must already have written their own participant
+      // doc (the app does that first), and must not already be listed.
+      function isJoin() {
+        let before = resource.data.get('participantIds', []);
+        let after = request.resource.data.get('participantIds', []);
+        return changedKeys().hasOnly(['participantIds', 'participantCount'])
+          && !(uid() in before)
+          && after is list
+          && after.size() == before.size() + 1
+          && after.toSet() == before.toSet().union([uid()].toSet())
+          && request.resource.data.participantCount == resource.data.get('participantCount', 0) + 1
+          && isParticipant(competitionId);
+      }
+
+      // ---------- participants/{userId} ----------
+      //
+      // Doc id is the user's uid. Created on join with
+      // { displayName, joinedAt: serverTimestamp(), score: 0 }. The only update
+      // is score: increment(+/-points) when the user checks/unchecks a task.
+      match /participants/{userId} {
+        allow read: if signedIn();
+
+        allow create: if signedIn()
+          && userId == uid()
+          && exists(/databases/$(database)/documents/competitions/$(competitionId))
+          && request.resource.data.keys().hasOnly(['displayName', 'joinedAt', 'score'])
+          && request.resource.data.keys().hasAll(['joinedAt', 'score'])
+          && (request.resource.data.get('displayName', null) == null
+              || request.resource.data.displayName is string)
+          && request.resource.data.joinedAt == request.time
+          && request.resource.data.score == 0;
+
+        // KNOWN GAP: the client computes its own score, so a user can set their
+        // own score to any number. Fixing this needs scoring to move to a
+        // trusted backend (e.g. a Cloud Function on entries). Until then we at
+        // least restrict the change to the caller's own doc and the score field.
+        allow update: if signedIn()
+          && userId == uid()
+          && changedKeys().hasOnly(['score'])
+          && request.resource.data.score is number;
+
+        allow delete: if false;
+      }
+
+      // ---------- teams/{teamId} ----------
+      //
+      // Read for the leaderboard. The app has no team-writing UI yet.
+      match /teams/{teamId} {
+        allow read: if signedIn();
+        allow write: if false;
+      }
+
+      // ---------- entries/{entryId} ----------
+      //
+      // One doc per completed task occurrence. Id is "<uid>_<taskId>" for
+      // one-and-done tasks or "<uid>_<taskId>_<YYYY-MM-DD>" otherwise.
+      // Written with setDoc() on check, read with getDoc() and removed with
+      // deleteDoc() on uncheck, and listed with where('userId', '==', uid).
+      match /entries/{entryId} {
+        // Own entries only. A get on a doc that does not exist yet is allowed
+        // when the id belongs to the caller (resource is null in that case).
+        allow get: if signedIn()
+          && (resource == null
+              ? entryId.split('_')[0] == uid()
+              : resource.data.userId == uid());
+        allow list: if signedIn() && resource.data.userId == uid();
+
+        allow create: if signedIn()
+          && isParticipant(competitionId)
+          && validNewEntry(request.resource.data);
+
+        // Entries are immutable: uncheck deletes, re-check creates a new doc.
+        allow update: if false;
+
+        allow delete: if signedIn() && resource.data.userId == uid();
+
+        function validNewEntry(data) {
+          return data.keys().hasOnly(['userId', 'taskId', 'date', 'completedAt',
+                                      'timezone', 'pointsAwarded'])
+            && data.keys().hasAll(['userId', 'taskId', 'date', 'completedAt',
+                                   'pointsAwarded'])
+            && data.userId == uid()
+            && data.taskId is string
+            && data.date is string
+            && (!('timezone' in data) || data.timezone is string)
+            && data.completedAt == request.time
+            && data.pointsAwarded is number
+            && (entryId == uid() + '_' + data.taskId
+                || entryId == uid() + '_' + data.taskId + '_' + data.date);
+        }
+      }
+    }
+  }
+}
