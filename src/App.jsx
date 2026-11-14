@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth';
-import { getFirestore, collection, addDoc, doc, setDoc, getDoc, onSnapshot, query, where, updateDoc, arrayUnion, arrayRemove, deleteDoc, serverTimestamp, increment } from 'firebase/firestore';
-import { ArrowLeft, Award, Calendar, CheckCircle, ChevronDown, ChevronRight, Crown, Edit, Eye, EyeOff, LogOut, Plus, RefreshCw, Send, Shield, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { getFirestore, collection, addDoc, doc, setDoc, getDoc, onSnapshot, query, where, updateDoc, arrayUnion, deleteDoc, serverTimestamp, increment } from 'firebase/firestore';
+import { ArrowLeft, Award, Calendar, Crown, Eye, EyeOff, LogOut, Plus, RefreshCw, Shield, Trash2, Users, X } from 'lucide-react';
 import DailyTasks from './components/DailyTasks';
 import WeeklyTasks from './components/WeeklyTasks';
 import OneAndDoneTasks from './components/OneAndDoneTasks';
@@ -276,7 +276,7 @@ function CompetitionCard({ competition, onSelect }) {
     );
 }
 
-function CreateCompetitionModal({ user, onClose, onSubmit }) {
+function CreateCompetitionModal({ onClose, onSubmit }) {
     const [step, setStep] = useState(1);
     const [formData, setFormData] = useState({
         name: '', description: '', startDate: '', endDate: '',
@@ -482,7 +482,6 @@ function CompetitionView({ user, competitionId, onBack }) {
     const [loading, setLoading] = useState(true);
     const [isParticipant, setIsParticipant] = useState(false);
     
-    const isCreator = useMemo(() => competition?.creatorId === user.uid, [competition, user]);
     const isAdmin = useMemo(() => competition?.adminIds?.includes(user.uid), [competition, user]);
 
     useEffect(() => {
@@ -633,7 +632,7 @@ function CompetitionView({ user, competitionId, onBack }) {
     );
 }
 
-function YourTasks({ user, competition, userEntries, onTaskCheck, participant }) {
+function YourTasks({ competition, userEntries, onTaskCheck, participant }) {
   const taskGroups = useMemo(() => ({
     daily: competition.tasks.filter(t => t.frequency === 'daily'),
     weekly: competition.tasks.filter(t => t.frequency === 'weekly'),
@@ -655,7 +654,7 @@ function YourTasks({ user, competition, userEntries, onTaskCheck, participant })
     if (availableTabs.length > 0) {
         setActiveTab(availableTabs[0]);
     }
-  }, [competition.tasks]); // Re-run when tasks change
+  }, [availableTabs]); // Re-run when tasks change (availableTabs is memoized on competition.tasks)
 
   useEffect(() => {
     // If the active tab becomes unavailable (e.g. due to filtering), switch to the first available tab

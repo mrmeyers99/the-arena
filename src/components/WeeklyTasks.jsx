@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, CheckSquare, Square } from 'lucide-react';
 
 // Helper to get the week number and the start of the week date
@@ -15,7 +15,7 @@ const getWeekInfo = (d) => {
     return { year: d.getUTCFullYear(), week: weekNo, startDate: firstDayOfWeek };
 }
 
-const WeeklyTasks = ({ tasks, userEntries, onTaskCheck, competitionStartDate, competitionEndDate }) => {
+const WeeklyTasks = ({ tasks, userEntries, onTaskCheck, competitionStartDate }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const handlePrevWeek = () => {

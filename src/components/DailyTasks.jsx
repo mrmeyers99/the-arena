@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, CheckSquare, Square } from 'lucide-react';
 
-const DailyTasks = ({ tasks, userEntries, onTaskCheck, competitionStartDate, competitionEndDate }) => {
+const DailyTasks = ({ tasks, userEntries, onTaskCheck, competitionStartDate }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
 
   const toISODateString = (date) => {
