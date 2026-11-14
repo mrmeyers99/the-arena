@@ -2,9 +2,8 @@ import { useMemo } from 'react';
 import { CheckSquare, Square } from 'lucide-react';
 
 const OneAndDoneTasks = ({ tasks, userEntries, onTaskCheck }) => {
-
   const completedTasks = useMemo(() => {
-    return new Set(userEntries.filter(e => e.taskId).map(e => e.taskId));
+    return new Set(userEntries.filter((e) => e.taskId).map((e) => e.taskId));
   }, [userEntries]);
 
   return (
@@ -13,7 +12,7 @@ const OneAndDoneTasks = ({ tasks, userEntries, onTaskCheck }) => {
         <h3 className="text-lg font-semibold text-white">One-and-Done Tasks</h3>
       </div>
       <div className="space-y-3">
-        {tasks.map(task => {
+        {tasks.map((task) => {
           const isCompleted = completedTasks.has(task.id);
           return (
             <div key={task.id} className="bg-gray-700 p-4 rounded-lg flex justify-between items-center">
@@ -30,11 +29,11 @@ const OneAndDoneTasks = ({ tasks, userEntries, onTaskCheck }) => {
           );
         })}
       </div>
-       <div className="flex justify-end mt-4">
-            <button className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
-                Submit Reports
-            </button>
-        </div>
+      <div className="flex justify-end mt-4">
+        <button className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
+          Submit Reports
+        </button>
+      </div>
     </div>
   );
 };
