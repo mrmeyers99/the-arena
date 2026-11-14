@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
 import {
   addDoc,
@@ -15,7 +15,8 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
-  where
+  where,
+  writeBatch
 } from 'firebase/firestore';
 
 // Must match the --project passed to `firebase emulators:exec` in package.json.
@@ -56,7 +57,6 @@ const newCompetition = (uid, overrides = {}) => ({
   creatorId: uid,
   adminIds: [uid],
   createdAt: serverTimestamp(),
-  accessCode: null,
   participantCount: 0,
   ...overrides
 });
@@ -77,13 +77,48 @@ const entryId = (uid, date = '2026-03-02') => `${uid}_TASK0001_${date}`;
 // Seed data with rules disabled.
 const seed = (fn) => testEnv.withSecurityRulesDisabled((ctx) => fn(ctx.firestore()));
 
-const seedCompetition = () =>
-  seed((f) =>
-    setDoc(doc(f, 'competitions', COMP), {
-      ...newCompetition(ALICE),
+const CODE = 'SECRET42';
+
+const seedCompetition = (overrides = {}) =>
+  seed(async (f) => {
+    await setDoc(doc(f, 'competitions', COMP), {
+      ...newCompetition(ALICE, overrides),
       createdAt: new Date()
-    })
-  );
+    });
+    if (overrides.accessType === 'code') {
+      await setDoc(doc(f, 'competitions', COMP, 'private', 'access'), { accessCode: CODE });
+    }
+  });
+
+// Mirrors Dashboard.handleCreateCompetition for a code competition.
+const createCodeCompetition = (uid, { comp = {}, secret = { accessCode: CODE } } = {}) => {
+  const f = db(uid);
+  const ref = doc(collection(f, 'competitions'));
+  const batch = writeBatch(f);
+  batch.set(ref, newCompetition(uid, { accessType: 'code', ...comp }));
+  if (secret) batch.set(doc(ref, 'private', 'access'), secret);
+  return batch.commit();
+};
+
+// Mirrors CompetitionView.handleJoin: optional access grant, participant doc
+// and competition counters in one batch.
+const joinBatch = (uid, accessCode) => {
+  const f = db(uid);
+  const batch = writeBatch(f);
+  if (accessCode !== undefined) {
+    batch.set(doc(f, 'competitions', COMP, 'accessGrants', uid), { accessCode });
+  }
+  batch.set(doc(f, 'competitions', COMP, 'participants', uid), {
+    displayName: uid,
+    joinedAt: serverTimestamp(),
+    score: 0
+  });
+  batch.update(doc(f, 'competitions', COMP), {
+    participantIds: arrayUnion(uid),
+    participantCount: increment(1)
+  });
+  return batch.commit();
+};
 
 const seedParticipant = (uid, score = 0) =>
   seed((f) =>
@@ -131,7 +166,7 @@ beforeEach(async () => {
 });
 
 describe('unauthenticated users', () => {
-  beforeEach(seedCompetition);
+  beforeEach(() => seedCompetition());
 
   it('cannot list or read competitions', async () => {
     await assertFails(getDocs(collection(anonDb(), 'competitions')));
@@ -169,20 +204,70 @@ describe('unknown collections', () => {
 });
 
 describe('competitions', () => {
-  it('signed-in users can list and read competitions', async () => {
+  it('signed-in users can read a competition by id', async () => {
     await seedCompetition();
-    await assertSucceeds(getDocs(query(collection(db(BOB), 'competitions'))));
     await assertSucceeds(getDoc(doc(db(BOB), 'competitions', COMP)));
+  });
+
+  // The three dashboard queries from Dashboard's useEffect.
+  const discoverable = (f) => query(collection(f, 'competitions'), where('accessType', 'in', ['open', 'code']));
+  const memberOf = (f, uid) => query(collection(f, 'competitions'), where('participantIds', 'array-contains', uid));
+  const adminOf = (f, uid) => query(collection(f, 'competitions'), where('adminIds', 'array-contains', uid));
+
+  it("allows the dashboard's queries", async () => {
+    await seedCompetition();
+    const f = db(BOB);
+    await assertSucceeds(getDocs(discoverable(f)));
+    await assertSucceeds(getDocs(memberOf(f, BOB)));
+    await assertSucceeds(getDocs(adminOf(f, BOB)));
+  });
+
+  it('rejects unfiltered listing, which would expose link competitions', async () => {
+    await seedCompetition({ accessType: 'link' });
+    await assertFails(getDocs(query(collection(db(MALLORY), 'competitions'))));
+    await assertFails(getDocs(query(collection(db(MALLORY), 'competitions'), where('accessType', '==', 'link'))));
+    // Asking for someone else's memberships is rejected too.
+    await assertFails(getDocs(adminOf(db(MALLORY), ALICE)));
+  });
+
+  it('link competitions only show up for their members and admins', async () => {
+    await seedCompetition({ accessType: 'link' });
+    expect((await getDocs(discoverable(db(MALLORY)))).size).toBe(0);
+    expect((await getDocs(adminOf(db(ALICE), ALICE))).size).toBe(1);
+    await seedJoined(BOB);
+    expect((await getDocs(memberOf(db(BOB), BOB))).size).toBe(1);
   });
 
   it('allows creating a competition exactly as the app does', async () => {
     await assertSucceeds(addDoc(collection(db(ALICE), 'competitions'), newCompetition(ALICE)));
   });
 
-  it('allows creating a code-access competition with an access code', async () => {
-    await assertSucceeds(
-      addDoc(collection(db(ALICE), 'competitions'), newCompetition(ALICE, { accessType: 'code', accessCode: 'ABC123' }))
-    );
+  it('allows creating a code competition together with its secret', async () => {
+    await assertSucceeds(createCodeCompetition(ALICE));
+  });
+
+  it('rejects storing the access code on the (world-readable) competition doc', async () => {
+    const col = collection(db(ALICE), 'competitions');
+    await assertFails(addDoc(col, newCompetition(ALICE, { accessCode: CODE })));
+    await assertFails(addDoc(col, newCompetition(ALICE, { accessCode: null })));
+    await assertFails(createCodeCompetition(ALICE, { comp: { accessCode: CODE } }));
+  });
+
+  it('rejects a code competition without a valid secret', async () => {
+    await assertFails(createCodeCompetition(ALICE, { secret: null }));
+    await assertFails(createCodeCompetition(ALICE, { secret: { accessCode: 'SHORT' } }));
+    await assertFails(createCodeCompetition(ALICE, { secret: { accessCode: CODE, extra: 1 } }));
+  });
+
+  it('rejects writing a secret for an existing competition or a non-code one', async () => {
+    await seedCompetition();
+    await assertFails(setDoc(doc(db(ALICE), 'competitions', COMP, 'private', 'access'), { accessCode: CODE }));
+    const f = db(ALICE);
+    const ref = doc(collection(f, 'competitions'));
+    const batch = writeBatch(f);
+    batch.set(ref, newCompetition(ALICE, { accessType: 'open' }));
+    batch.set(doc(ref, 'private', 'access'), { accessCode: CODE });
+    await assertFails(batch.commit());
   });
 
   it('allows tasks whose points are strings (number inputs yield strings)', async () => {
@@ -217,7 +302,11 @@ describe('competitions', () => {
   });
 
   describe('joining', () => {
-    beforeEach(seedCompetition);
+    beforeEach(() => seedCompetition());
+
+    it("allows the app's batched join flow", async () => {
+      await assertSucceeds(joinBatch(BOB));
+    });
 
     it("allows the app's join flow (participant doc, then counters)", async () => {
       const f = db(BOB);
@@ -300,6 +389,67 @@ describe('competitions', () => {
     });
   });
 
+  describe('code competitions', () => {
+    beforeEach(() => seedCompetition({ accessType: 'code' }));
+
+    it('lets admins read the access code, and nobody else', async () => {
+      await assertSucceeds(getDoc(doc(db(ALICE), 'competitions', COMP, 'private', 'access')));
+      await assertFails(getDoc(doc(db(BOB), 'competitions', COMP, 'private', 'access')));
+      await assertFails(getDocs(collection(db(BOB), 'competitions', COMP, 'private')));
+    });
+
+    it('does not expose the code on the competition doc', async () => {
+      const snap = await getDoc(doc(db(MALLORY), 'competitions', COMP));
+      expect(snap.data()).not.toHaveProperty('accessCode');
+    });
+
+    it('allows joining with the right code', async () => {
+      await assertSucceeds(joinBatch(BOB, CODE));
+    });
+
+    it('rejects joining without a code or with the wrong one', async () => {
+      await assertFails(joinBatch(MALLORY));
+      await assertFails(joinBatch(MALLORY, 'WRONG123'));
+      await assertFails(joinBatch(MALLORY, null));
+      // The old two-step flow (participant doc, then counters) no longer works either.
+      await assertFails(
+        setDoc(doc(db(MALLORY), 'competitions', COMP, 'participants', MALLORY), {
+          displayName: 'M',
+          joinedAt: serverTimestamp(),
+          score: 0
+        })
+      );
+    });
+
+    it("rejects forging, reusing or reading other users' grants", async () => {
+      await assertSucceeds(joinBatch(BOB, CODE));
+      await assertFails(setDoc(doc(db(MALLORY), 'competitions', COMP, 'accessGrants', BOB), { accessCode: CODE }));
+      await assertFails(getDoc(doc(db(MALLORY), 'competitions', COMP, 'accessGrants', BOB)));
+      await assertSucceeds(getDoc(doc(db(BOB), 'competitions', COMP, 'accessGrants', BOB)));
+      await assertFails(updateDoc(doc(db(BOB), 'competitions', COMP, 'accessGrants', BOB), { accessCode: 'X' }));
+      await assertFails(deleteDoc(doc(db(BOB), 'competitions', COMP, 'accessGrants', BOB)));
+    });
+
+    it('rejects changing or deleting the secret, even by the creator', async () => {
+      const ref = doc(db(ALICE), 'competitions', COMP, 'private', 'access');
+      await assertFails(setDoc(ref, { accessCode: 'NEWCODE99' }));
+      await assertFails(deleteDoc(ref));
+    });
+  });
+
+  describe('link competitions', () => {
+    beforeEach(() => seedCompetition({ accessType: 'link' }));
+
+    it('anyone with the id can open and join', async () => {
+      await assertSucceeds(getDoc(doc(db(BOB), 'competitions', COMP)));
+      await assertSucceeds(joinBatch(BOB));
+    });
+
+    it('rejects access grants (they only apply to code competitions)', async () => {
+      await assertFails(setDoc(doc(db(BOB), 'competitions', COMP, 'accessGrants', BOB), { accessCode: CODE }));
+    });
+  });
+
   it('rejects changing protected competition fields, even by the creator', async () => {
     await seedCompetition();
     const ref = (uid) => doc(db(uid), 'competitions', COMP);
@@ -319,7 +469,7 @@ describe('competitions', () => {
 });
 
 describe('participants', () => {
-  beforeEach(seedCompetition);
+  beforeEach(() => seedCompetition());
 
   it('signed-in users can read the participant list (leaderboard)', async () => {
     await seedParticipant(BOB, 30);
@@ -413,7 +563,7 @@ describe('participants', () => {
 });
 
 describe('teams', () => {
-  beforeEach(seedCompetition);
+  beforeEach(() => seedCompetition());
 
   it('signed-in users can read teams', async () => {
     await seed((f) => setDoc(doc(f, 'competitions', COMP, 'teams', 't1'), { name: 'Red', score: 0 }));
